@@ -39,7 +39,8 @@
 #' )
 #' }
 #'
-#' @import data.table
+#' @import data.table Rcpp
+#' @importFrom Rcpp evalCpp
 #' @importFrom RcppParallel setThreadOptions
 #' @useDynLib fastmed, .registration = TRUE
 #' @export

@@ -82,26 +82,26 @@ struct MediationWorker : public Worker {
     const std::vector<std::string> mediator_cols;
     const std::vector<std::string> outcome_cols;
     const int nrep;
-    const std::string output_file;
     const Rcpp::DataFrame combinations;
+    const std::string output_file;
     
     // Constructor
-    MediationWorker(const NumericMatrix data,
-                    const CharacterVector column_names,
-                    const CharacterVector exposure_cols,
-                    const CharacterVector mediator_cols,
-                    const CharacterVector outcome_cols,
-                    int nrep,
-                    std::string output_file,
-                    Rcpp::DataFrame combinations)
-        : data(data),
-          column_names(Rcpp::as<std::vector<std::string>>(column_names)),
-          exposure_cols(Rcpp::as<std::vector<std::string>>(exposure_cols)),
-          mediator_cols(Rcpp::as<std::vector<std::string>>(mediator_cols)),
-          outcome_cols(Rcpp::as<std::vector<std::string>>(outcome_cols)),
-          nrep(nrep),
-          output_file(output_file),
-          combinations(combinations) {}
+    MediationWorker(const NumericMatrix data_,
+                    const CharacterVector column_names_,
+                    const CharacterVector exposure_cols_,
+                    const CharacterVector mediator_cols_,
+                    const CharacterVector outcome_cols_,
+                    int nrep_,
+                    std::string output_file_,
+                    Rcpp::DataFrame combinations_)
+        : data(data_),
+          column_names(Rcpp::as<std::vector<std::string>>(column_names_)),
+          exposure_cols(Rcpp::as<std::vector<std::string>>(exposure_cols_)),
+          mediator_cols(Rcpp::as<std::vector<std::string>>(mediator_cols_)),
+          outcome_cols(Rcpp::as<std::vector<std::string>>(outcome_cols_)),
+          nrep(nrep_),
+          output_file(output_file_),
+          combinations(combinations_) {}
     
     // Function call operator that work for the specified range (begin/end)
     void operator()(std::size_t begin, std::size_t end) {
@@ -119,6 +119,11 @@ struct MediationWorker : public Worker {
             Rcpp::CharacterVector exposure_vec = combinations["exposure"];
             Rcpp::CharacterVector mediator_vec = combinations["mediator"];
             Rcpp::CharacterVector outcome_vec = combinations["outcome"];
+            
+            // Local buffer to accumulate results
+            std::vector<std::string> local_buffer;
+            const size_t buffer_size = 100;
+            
             
             for (std::size_t idx = begin; idx < end; ++idx) {
                 std::string exposure_col = Rcpp::as<std::string>(exposure_vec[idx]);
@@ -219,14 +224,40 @@ struct MediationWorker : public Worker {
                        << percentile_cpp(tot_samples, 2.5) << "," << percentile_cpp(tot_samples, 97.5) << ","
                        << p_value_cpp(tot_samples, 0.0) << "\n";
                 
-                // Write results to file (thread-safe)
-                       {
-                           std::lock_guard<std::mutex> lock(file_mutex);
-                           outfile << result.str();
-                       }
+                // Add result to local buffer
+                local_buffer.push_back(result.str());
+                
+                // If buffer is full, write to file
+                if (local_buffer.size() >= buffer_size) {
+                    // Lock mutex and write buffer to file
+                    {
+                        std::lock_guard<std::mutex> lock(file_mutex);
+                        std::ofstream outfile(output_file, std::ios::app);
+                        if (!outfile.is_open()) {
+                            throw std::runtime_error("Unable to open output file");
+                        }
+                        for (const auto& line : local_buffer) {
+                            outfile << line;
+                        }
+                        outfile.close();
+                    }
+                    // Clear local buffer
+                    local_buffer.clear();
+                }
             }
             
-            outfile.close();
+            // After processing all combinations, write any remaining results in the buffer
+            if (!local_buffer.empty()) {
+                std::lock_guard<std::mutex> lock(file_mutex);
+                std::ofstream outfile(output_file, std::ios::app);
+                if (!outfile.is_open()) {
+                    throw std::runtime_error("Unable to open output file");
+                }
+                for (const auto& line : local_buffer) {
+                    outfile << line;
+                }
+                outfile.close();
+            }
         } catch (const std::exception& e) {
             Rcpp::stop(std::string("Error in worker: ") + e.what());
         }
