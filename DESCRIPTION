@@ -12,7 +12,6 @@ BugReports: https://github.com/daehwankim12/fastmed/issues
 License: MIT + file LICENSE
 Imports:
     Rcpp,
-    RcppEigen,
     RcppParallel,
     data.table
 LinkingTo:
@@ -21,6 +20,7 @@ LinkingTo:
     RcppParallel
 Suggests:
     rmarkdown,
+    withr,
     testthat (>= 3.0.0)
 Encoding: UTF-8
 RoxygenNote: 7.3.2
