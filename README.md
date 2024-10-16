@@ -1,6 +1,6 @@
 # fastmed
 
-![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg) ![CRAN_Status_Badge](https://www.r-pkg.org/badges/version/fastmed)
+![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg) ![CRAN_Status_Badge](https://www.r-pkg.org/badges/version/fastmed) [![R-CMD-check](https://github.com/daehwankim12/fastmed/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/daehwankim12/fastmed/actions/workflows/R-CMD-check.yaml) 
 
 ## Overview
 

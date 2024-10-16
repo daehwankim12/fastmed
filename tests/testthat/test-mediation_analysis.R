@@ -1,8 +1,4 @@
 # tests/testthat/test-mediation_analysis.R
-library(testthat)
-library(fastmed)
-library(data.table)
-
 test_that("mediation_analysis works correctly with default prefixes", {
   # Create example data
   set.seed(123)
@@ -14,10 +10,10 @@ test_that("mediation_analysis works correctly with default prefixes", {
     CORTEX1 = rnorm(50),
     CORTEX2 = rnorm(50)
   )
-  
+
   # Temporary output CSV file
   output_csv <- tempfile(fileext = ".csv")
-  
+
   # Run mediation_analysis function
   mediation_analysis(
     data = test_data_default,
@@ -26,13 +22,13 @@ test_that("mediation_analysis works correctly with default prefixes", {
     output_file = output_csv,
     num_threads = 2 # Adjust thread count for testing environment
   )
-  
+
   # Read results
   results <- fread(output_csv)
-  
+
   # Expected result: 2 (CECUM) * 2 (SERUM) * 2 (CORTEX) = 8 combinations
   expect_equal(nrow(results), 8)
-  
+
   # Remove temporary file
   file.remove(output_csv)
 })
@@ -48,10 +44,10 @@ test_that("mediation_analysis works correctly with custom prefixes", {
     OUT1 = rnorm(50),
     OUT2 = rnorm(50)
   )
-  
+
   # Temporary output CSV file
   output_csv <- tempfile(fileext = ".csv")
-  
+
   # Run mediation_analysis function
   mediation_analysis(
     data = test_data_custom,
@@ -60,13 +56,13 @@ test_that("mediation_analysis works correctly with custom prefixes", {
     output_file = output_csv,
     num_threads = 2 # Adjust thread count for testing environment
   )
-  
+
   # Read results
   results <- fread(output_csv)
-  
+
   # Expected result: 2 (EXP) * 2 (MED) * 2 (OUT) = 8 combinations
   expect_equal(nrow(results), 8)
-  
+
   # Remove temporary file
   file.remove(output_csv)
 })
@@ -82,10 +78,10 @@ test_that("mediation_analysis handles large datasets correctly", {
     CORTEX1 = rnorm(1000),
     CORTEX2 = rnorm(1000)
   )
-  
+
   # Temporary output CSV file
   output_csv <- tempfile(fileext = ".csv")
-  
+
   # Run mediation_analysis function
   mediation_analysis(
     data = test_data_large,
@@ -94,13 +90,13 @@ test_that("mediation_analysis handles large datasets correctly", {
     output_file = output_csv,
     num_threads = 2 # Adjust thread count for testing environment
   )
-  
+
   # Read results
   results <- fread(output_csv)
-  
+
   # Expected result: 2 (CECUM) * 2 (SERUM) * 2 (CORTEX) = 8 combinations
   expect_equal(nrow(results), 8)
-  
+
   # Remove temporary file
   file.remove(output_csv)
 })
