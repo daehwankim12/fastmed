@@ -52,29 +52,29 @@ mediation_analysis <- function(data,
   if (!data.table::is.data.table(data)) {
     data <- data.table::as.data.table(data)
   }
-  
+
   # Set number of threads for RcppParallel
   RcppParallel::setThreadOptions(numThreads = num_threads)
-  
+
   # Function to find columns that start with given prefixes
   find_columns <- function(prefixes, all_columns) {
     unique(unlist(lapply(prefixes, function(prefix) {
       grep(paste0("^", prefix), all_columns, value = TRUE)
     })))
   }
-  
+
   # Find actual column names based on prefixes
   all_columns <- names(data)
   exposure_cols <- find_columns(columns$exposure, all_columns)
   mediator_cols <- find_columns(columns$mediator, all_columns)
   outcome_cols <- find_columns(columns$outcome, all_columns)
-  
+
   # Check if columns were found
   if (length(exposure_cols) == 0 ||
-      length(mediator_cols) == 0 || length(outcome_cols) == 0) {
+    length(mediator_cols) == 0 || length(outcome_cols) == 0) {
     stop("No columns found for one or more of exposure, mediator, or outcome.")
   }
-  
+
   # Generate all combinations
   combinations <- expand.grid(
     exposure = exposure_cols,
@@ -82,14 +82,14 @@ mediation_analysis <- function(data,
     outcome = outcome_cols,
     stringsAsFactors = FALSE
   )
-  
+
   # Initialize output file
   cat(
     "combination,indirect_t1_estimate,indirect_t1_std_err,indirect_t1_lcb,indirect_t1_ucb,indirect_t1_p_value,indirect_t0_estimate,indirect_t0_std_err,indirect_t0_lcb,indirect_t0_ucb,indirect_t0_p_value,direct_t1_estimate,direct_t1_std_err,direct_t1_lcb,direct_t1_ucb,direct_t1_p_value,direct_t0_estimate,direct_t0_std_err,direct_t0_lcb,direct_t0_ucb,direct_t0_p_value,total_effect_estimate,total_effect_std_err,total_effect_lcb,total_effect_ucb,total_effect_p_value\n",
     file = output_file,
     append = FALSE
   )
-  
+
   # Call C++ function
   mediation_analysis_cpp(
     as.matrix(data),
@@ -101,7 +101,9 @@ mediation_analysis <- function(data,
     nrep,
     output_file
   )
-  cat("Mediation analysis completed. Results saved to",
-      output_file,
-      "\n")
+  cat(
+    "Mediation analysis completed. Results saved to",
+    output_file,
+    "\n"
+  )
 }
