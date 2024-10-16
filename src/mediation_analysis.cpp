@@ -82,7 +82,6 @@ struct MediationWorker : public Worker {
     const std::vector<std::string> mediator_cols;
     const std::vector<std::string> outcome_cols;
     const int nrep;
-    const Rcpp::DataFrame combinations;
     const std::string output_file;
     const Rcpp::DataFrame combinations;
 
