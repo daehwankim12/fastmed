@@ -12,25 +12,22 @@ Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
 // mediation_analysis_cpp
-void mediation_analysis_cpp(NumericMatrix data, CharacterVector column_names, CharacterVector exposure_cols, CharacterVector mediator_cols, CharacterVector outcome_cols, DataFrame combinations, int nrep, std::string output_file);
-RcppExport SEXP _fastmed_mediation_analysis_cpp(SEXP dataSEXP, SEXP column_namesSEXP, SEXP exposure_colsSEXP, SEXP mediator_colsSEXP, SEXP outcome_colsSEXP, SEXP combinationsSEXP, SEXP nrepSEXP, SEXP output_fileSEXP) {
+void mediation_analysis_cpp(NumericMatrix data, CharacterVector column_names, DataFrame combinations, int nrep, std::string output_file);
+RcppExport SEXP _fastmed_mediation_analysis_cpp(SEXP dataSEXP, SEXP column_namesSEXP, SEXP combinationsSEXP, SEXP nrepSEXP, SEXP output_fileSEXP) {
 BEGIN_RCPP
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< NumericMatrix >::type data(dataSEXP);
     Rcpp::traits::input_parameter< CharacterVector >::type column_names(column_namesSEXP);
-    Rcpp::traits::input_parameter< CharacterVector >::type exposure_cols(exposure_colsSEXP);
-    Rcpp::traits::input_parameter< CharacterVector >::type mediator_cols(mediator_colsSEXP);
-    Rcpp::traits::input_parameter< CharacterVector >::type outcome_cols(outcome_colsSEXP);
     Rcpp::traits::input_parameter< DataFrame >::type combinations(combinationsSEXP);
     Rcpp::traits::input_parameter< int >::type nrep(nrepSEXP);
     Rcpp::traits::input_parameter< std::string >::type output_file(output_fileSEXP);
-    mediation_analysis_cpp(data, column_names, exposure_cols, mediator_cols, outcome_cols, combinations, nrep, output_file);
+    mediation_analysis_cpp(data, column_names, combinations, nrep, output_file);
     return R_NilValue;
 END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_fastmed_mediation_analysis_cpp", (DL_FUNC) &_fastmed_mediation_analysis_cpp, 8},
+    {"_fastmed_mediation_analysis_cpp", (DL_FUNC) &_fastmed_mediation_analysis_cpp, 5},
     {NULL, NULL, 0}
 };
 

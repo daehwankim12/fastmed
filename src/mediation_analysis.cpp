@@ -10,11 +10,10 @@
 #include <fstream>
 #include <iomanip>
 #include <mutex>
-#include <condition_variable>
-#include <atomic>
 #include <stdexcept>
-#include <memory>
 #include <sstream>
+#include <cmath>
+#include <unordered_map>
 
 // [[Rcpp::depends(RcppEigen, RcppParallel)]]
 
@@ -22,256 +21,155 @@ using namespace Rcpp;
 using namespace RcppParallel;
 using namespace Eigen;
 
-// Helper functions
 double mean_cpp(const std::vector<double>& data) {
     if (data.empty()) {
-        throw std::runtime_error("Cannot compute mean of empty vector");
+        return std::numeric_limits<double>::quiet_NaN();
     }
     return std::accumulate(data.begin(), data.end(), 0.0) / data.size();
 }
 
 double std_dev_cpp(const std::vector<double>& data) {
     if (data.size() < 2) {
-        throw std::runtime_error("Need at least two elements to compute standard deviation");
+        return std::numeric_limits<double>::quiet_NaN();
     }
+    
     double m = mean_cpp(data);
-    double accum = 0.0;
-    for (const auto& val : data) {
-        accum += (val - m) * (val - m);
-    }
+    double accum = std::accumulate(data.begin(), data.end(), 0.0,
+                                   [m](double sum, double val) { return sum + (val - m) * (val - m); });
     return std::sqrt(accum / (data.size() - 1));
 }
 
-double percentile_cpp(std::vector<double> data, double perc) {
-    if(data.empty()) {
-        throw std::runtime_error("Cannot compute percentile of empty vector");
+double percentile_cpp(const std::vector<double>& data, double perc) {
+    if (data.empty()) {
+        return std::numeric_limits<double>::quiet_NaN();
     }
-    std::sort(data.begin(), data.end());
-    double idx = perc / 100.0 * (data.size() - 1);
+    std::vector<double> sorted_data = data;
+    std::sort(sorted_data.begin(), sorted_data.end());
+    double idx = perc / 100.0 * (sorted_data.size() - 1);
     size_t lower = static_cast<size_t>(std::floor(idx));
     size_t upper = static_cast<size_t>(std::ceil(idx));
-    if(lower == upper) {
-        return data[lower];
+    if (lower == upper) {
+        return sorted_data[lower];
     }
     double weight = idx - lower;
-    return data[lower] * (1.0 - weight) + data[upper] * weight;
+    return sorted_data[lower] * (1.0 - weight) + sorted_data[upper] * weight;
 }
 
 double p_value_cpp(const std::vector<double>& data, double estimate) {
     if (data.empty()) {
-        throw std::runtime_error("Cannot compute p-value of empty vector");
+        return std::numeric_limits<double>::quiet_NaN();
     }
-    size_t count = std::count_if(data.begin(), data.end(), [&](double v) { return v <= estimate; });
-    return static_cast<double>(count) / data.size();
+    return static_cast<double>(std::count_if(data.begin(), data.end(), 
+                                             [estimate](double v) { return v <= estimate; })) / data.size();
 }
 
-// Linear regression using Eigen
 VectorXd linear_regression(const MatrixXd& X, const VectorXd& y) {
     if (X.rows() != y.rows()) {
         throw std::runtime_error("Mismatch in number of rows between X and y");
     }
-    // Using QR decomposition for better numerical stability
-    return X.colPivHouseholderQr().solve(y);
+    JacobiSVD<MatrixXd> svd(X.transpose() * X);
+    double cond = svd.singularValues()(0) / svd.singularValues()(svd.singularValues().size() - 1);
+    if (cond > 1e10) {
+        throw std::runtime_error("Matrix is (near) singular");
+    }
+    return (X.transpose() * X).ldlt().solve(X.transpose() * y);
 }
 
-// Thread-safe file handler
-class FileHandler {
+class BufferedFileWriter {
 private:
     std::ofstream file;
+    std::vector<std::string> buffer;
     std::mutex mutex;
-    std::condition_variable cv;
-    std::atomic<bool> is_writing{false};
-    std::atomic<int> active_writers{0};
+    const size_t max_buffer_size;
     
 public:
-    FileHandler(const std::string& filename) : file(filename, std::ios::app) {
+    BufferedFileWriter(const std::string& filename, size_t buffer_size = 1000)
+        : file(filename, std::ios::out | std::ios::trunc), max_buffer_size(buffer_size) {
         if (!file.is_open()) {
             throw std::runtime_error("Unable to open output file");
         }
+        buffer.reserve(max_buffer_size);
     }
     
-    ~FileHandler() {
-        waitForCompletion();
-        if (file.is_open()) {
-            file.close();
+    ~BufferedFileWriter() {
+        try {
+            flush();
+        } catch (...) {
+            // Ignore exceptions in destructor
         }
+        file.close();
     }
     
     void write(const std::string& data) {
-        std::unique_lock<std::mutex> lock(mutex);
-        active_writers++;
-        is_writing = true;
-        file << data;
-        file.flush();
-        active_writers--;
-        is_writing = (active_writers > 0);
-        cv.notify_all();
+        std::lock_guard<std::mutex> lock(mutex);
+        buffer.push_back(data);
+        if (buffer.size() >= max_buffer_size) {
+            flush_internal();
+        }
     }
     
-    void waitForCompletion() {
-        std::unique_lock<std::mutex> lock(mutex);
-        cv.wait(lock, [this] { return !is_writing; });
+    void flush() {
+        std::lock_guard<std::mutex> lock(mutex);
+        flush_internal();
+    }
+    
+private:
+    void flush_internal() {
+        for (const auto& line : buffer) {
+            file << line;
+        }
+        file.flush();
+        buffer.clear();
     }
 };
 
-// Worker class for parallel processing
 class MediationWorker : public Worker {
 private:
-    // Inputs (using shared_ptr for large data structures)
-    const std::shared_ptr<MatrixXd> data;
-    const std::vector<std::string> column_names;
-    const std::vector<std::string> exposure_cols;
-    const std::vector<std::string> mediator_cols;
-    const std::vector<std::string> outcome_cols;
+    const MatrixXd& data;
+    const std::vector<std::string>& column_names;
+    const std::vector<std::string>& exposure_vec;
+    const std::vector<std::string>& mediator_vec;
+    const std::vector<std::string>& outcome_vec;
     const int nrep;
-    const Rcpp::DataFrame combinations;
-    std::shared_ptr<FileHandler> file_handler;
+    std::unordered_map<std::string, int> column_index_map;
+    BufferedFileWriter& writer;
     
-    // Local buffer
-    std::vector<std::string> local_buffer;
-    const size_t buffer_size = 1000;
+    VectorXd boot_exposure;
+    VectorXd boot_mediator;
+    VectorXd boot_outcome;
+    MatrixXd X_med_boot;
+    MatrixXd X_out_boot;
+    
+    struct BootstrapResult {
+        double ind0, ind1, dir0, dir1, tot;
+    };
     
 public:
-    // Constructor
-    MediationWorker(const std::shared_ptr<MatrixXd> data_,
-                    const CharacterVector column_names_,
-                    const CharacterVector exposure_cols_,
-                    const CharacterVector mediator_cols_,
-                    const CharacterVector outcome_cols_,
+    MediationWorker(const MatrixXd& data_,
+                    const std::vector<std::string>& column_names_,
                     int nrep_,
-                    Rcpp::DataFrame combinations_,
-                    std::shared_ptr<FileHandler> file_handler_)
-        : data(data_),
-          column_names(Rcpp::as<std::vector<std::string>>(column_names_)),
-          exposure_cols(Rcpp::as<std::vector<std::string>>(exposure_cols_)),
-          mediator_cols(Rcpp::as<std::vector<std::string>>(mediator_cols_)),
-          outcome_cols(Rcpp::as<std::vector<std::string>>(outcome_cols_)),
-          nrep(nrep_),
-          combinations(combinations_),
-          file_handler(file_handler_) {
-        local_buffer.reserve(buffer_size);
+                    const std::vector<std::string>& exposure_vec_,
+                    const std::vector<std::string>& mediator_vec_,
+                    const std::vector<std::string>& outcome_vec_,
+                    BufferedFileWriter& writer_)
+        : data(data_), column_names(column_names_), nrep(nrep_),
+          exposure_vec(exposure_vec_), mediator_vec(mediator_vec_), outcome_vec(outcome_vec_),
+          writer(writer_),
+          boot_exposure(data_.rows()), boot_mediator(data_.rows()), boot_outcome(data_.rows()),
+          X_med_boot(data_.rows(), 2), X_out_boot(data_.rows(), 3) {
+        for (size_t c = 0; c < column_names.size(); ++c) {
+            column_index_map[column_names[c]] = c;
+        }
     }
     
-    // Function call operator that work for the specified range (begin/end)
     void operator()(std::size_t begin, std::size_t end) {
         try {
-            // Random number generator
             std::mt19937 gen(std::random_device{}());
-            std::uniform_int_distribution<> dis(0, data->rows() - 1);
-            
-            // Get column vectors from combinations DataFrame
-            Rcpp::CharacterVector exposure_vec = combinations["exposure"];
-            Rcpp::CharacterVector mediator_vec = combinations["mediator"];
-            Rcpp::CharacterVector outcome_vec = combinations["outcome"];
-            
-            // Pre-allocate vectors for bootstrap samples
-            std::vector<double> ind0_samples(nrep);
-            std::vector<double> ind1_samples(nrep);
-            std::vector<double> dir0_samples(nrep);
-            std::vector<double> dir1_samples(nrep);
-            std::vector<double> tot_samples(nrep);
+            std::uniform_int_distribution<> dis(0, data.rows() - 1);
             
             for (std::size_t idx = begin; idx < end; ++idx) {
-                std::string exposure_col = Rcpp::as<std::string>(exposure_vec[idx]);
-                std::string mediator_col = Rcpp::as<std::string>(mediator_vec[idx]);
-                std::string outcome_col = Rcpp::as<std::string>(outcome_vec[idx]);
-                
-                // Find column indices
-                int exp_idx = -1, med_idx = -1, out_idx = -1;
-                for (int c = 0; c < column_names.size(); ++c) {
-                    if (column_names[c] == exposure_col) exp_idx = c;
-                    if (column_names[c] == mediator_col) med_idx = c;
-                    if (column_names[c] == outcome_col) out_idx = c;
-                }
-                
-                if (exp_idx == -1 || med_idx == -1 || out_idx == -1) {
-                    throw std::runtime_error("Column not found");
-                }
-                
-                // Extract data for current combination
-                VectorXd exposure = data->col(exp_idx);
-                VectorXd mediator = data->col(med_idx);
-                VectorXd outcome = data->col(out_idx);
-                
-                // Prepare design matrices
-                MatrixXd X_med(data->rows(), 2);
-                X_med.col(0).setOnes();
-                X_med.col(1) = exposure;
-                
-                MatrixXd X_out(data->rows(), 3);
-                X_out.col(0).setOnes();
-                X_out.col(1) = mediator;
-                X_out.col(2) = exposure;
-                
-                // Perform initial regressions
-                VectorXd beta_med = linear_regression(X_med, mediator);
-                VectorXd beta_out = linear_regression(X_out, outcome);
-                
-                // Bootstrap
-                for (int rep = 0; rep < nrep; ++rep) {
-                    // Sample with replacement
-                    VectorXd boot_exposure(data->rows()), boot_mediator(data->rows()), boot_outcome(data->rows());
-                    for (int m = 0; m < data->rows(); ++m) {
-                        int sample_idx = dis(gen);
-                        boot_exposure[m] = exposure[sample_idx];
-                        boot_mediator[m] = mediator[sample_idx];
-                        boot_outcome[m] = outcome[sample_idx];
-                    }
-                    
-                    // Regressions on bootstrap sample
-                    VectorXd beta_med_boot = linear_regression(X_med, boot_mediator);
-                    VectorXd beta_out_boot = linear_regression(X_out, boot_outcome);
-                    
-                    // Calculate effects
-                    double m0 = beta_med_boot[0];
-                    double m1 = beta_med_boot[0] + beta_med_boot[1];
-                    double y00 = beta_out_boot[0] + beta_out_boot[1] * m0;
-                    double y10 = beta_out_boot[0] + beta_out_boot[1] * m1;
-                    double y01 = y00 + beta_out_boot[2];
-                    double y11 = y10 + beta_out_boot[2];
-                    
-                    ind0_samples[rep] = y10 - y00;
-                    ind1_samples[rep] = y11 - y01;
-                    dir0_samples[rep] = y01 - y00;
-                    dir1_samples[rep] = y11 - y10;
-                    tot_samples[rep] = y11 - y00;
-                }
-                
-                // Calculate statistics
-                std::string combination = exposure_col + "_" + mediator_col + "_" + outcome_col;
-                
-                // Prepare result string using stringstream for efficiency
-                std::stringstream result;
-                result << std::fixed << std::setprecision(6);
-                result << combination << ","
-                       << mean_cpp(ind1_samples) << "," << std_dev_cpp(ind1_samples) << ","
-                       << percentile_cpp(ind1_samples, 2.5) << "," << percentile_cpp(ind1_samples, 97.5) << ","
-                       << p_value_cpp(ind1_samples, 0.0) << ","
-                       << mean_cpp(ind0_samples) << "," << std_dev_cpp(ind0_samples) << ","
-                       << percentile_cpp(ind0_samples, 2.5) << "," << percentile_cpp(ind0_samples, 97.5) << ","
-                       << p_value_cpp(ind0_samples, 0.0) << ","
-                       << mean_cpp(dir1_samples) << "," << std_dev_cpp(dir1_samples) << ","
-                       << percentile_cpp(dir1_samples, 2.5) << "," << percentile_cpp(dir1_samples, 97.5) << ","
-                       << p_value_cpp(dir1_samples, 0.0) << ","
-                       << mean_cpp(dir0_samples) << "," << std_dev_cpp(dir0_samples) << ","
-                       << percentile_cpp(dir0_samples, 2.5) << "," << percentile_cpp(dir0_samples, 97.5) << ","
-                       << p_value_cpp(dir0_samples, 0.0) << ","
-                       << mean_cpp(tot_samples) << "," << std_dev_cpp(tot_samples) << ","
-                       << percentile_cpp(tot_samples, 2.5) << "," << percentile_cpp(tot_samples, 97.5) << ","
-                       << p_value_cpp(tot_samples, 0.0) << "\n";
-                
-                // Add result to local buffer
-                local_buffer.push_back(result.str());
-                
-                // If buffer is full, write to file
-                if (local_buffer.size() >= buffer_size) {
-                    flush_buffer();
-                }
-            }
-            
-            // After the loop, flush any remaining data
-            if (!local_buffer.empty()) {
-                flush_buffer();
+                std::string result = process_combination(idx, gen, dis);
+                writer.write(result);
             }
         } catch (const std::exception& e) {
             Rcpp::stop(std::string("Error in worker: ") + e.what());
@@ -279,42 +177,148 @@ public:
     }
     
 private:
-    void flush_buffer() {
-        if (!local_buffer.empty()) {
-            std::string combined_buffer;
-            for (const auto& line : local_buffer) {
-                combined_buffer += line;
-            }
-            file_handler->write(combined_buffer);
-            local_buffer.clear();
+    std::string process_combination(std::size_t idx, std::mt19937& gen, std::uniform_int_distribution<>& dis) {
+        std::string exposure_col = exposure_vec[idx];
+        std::string mediator_col = mediator_vec[idx];
+        std::string outcome_col = outcome_vec[idx];
+        
+        int exp_idx = get_column_index(exposure_col);
+        int med_idx = get_column_index(mediator_col);
+        int out_idx = get_column_index(outcome_col);
+        
+        VectorXd exposure = data.col(exp_idx);
+        VectorXd mediator = data.col(med_idx);
+        VectorXd outcome = data.col(out_idx);
+        
+        std::vector<BootstrapResult> bootstrap_results = perform_bootstrap(exposure, mediator, outcome, gen, dis);
+        
+        return format_results(exposure_col, mediator_col, outcome_col, bootstrap_results);
+    }
+    
+    int get_column_index(const std::string& col_name) {
+        auto it = column_index_map.find(col_name);
+        if (it == column_index_map.end()) {
+            throw std::runtime_error("Column not found: " + col_name);
         }
+        return it->second;
+    }
+    
+    std::vector<BootstrapResult> perform_bootstrap(const VectorXd& exposure, const VectorXd& mediator, const VectorXd& outcome,
+                                                   std::mt19937& gen, std::uniform_int_distribution<>& dis) {
+        std::vector<BootstrapResult> results(nrep);
+        
+        for (int rep = 0; rep < nrep; ++rep) {
+            for (int m = 0; m < data.rows(); ++m) {
+                int sample_idx = dis(gen);
+                boot_exposure[m] = exposure[sample_idx];
+                boot_mediator[m] = mediator[sample_idx];
+                boot_outcome[m] = outcome[sample_idx];
+            }
+            
+            X_med_boot.col(0).setOnes();
+            X_med_boot.col(1) = boot_exposure;
+            
+            X_out_boot.col(0).setOnes();
+            X_out_boot.col(1) = boot_mediator;
+            X_out_boot.col(2) = boot_exposure;
+            
+            try {
+                VectorXd beta_med_boot = linear_regression(X_med_boot, boot_mediator);
+                VectorXd beta_out_boot = linear_regression(X_out_boot, boot_outcome);
+                
+                double m0 = beta_med_boot[0];
+                double m1 = beta_med_boot[0] + beta_med_boot[1];
+                double y00 = beta_out_boot[0] + beta_out_boot[1] * m0;
+                double y10 = beta_out_boot[0] + beta_out_boot[1] * m1;
+                double y01 = y00 + beta_out_boot[2];
+                double y11 = y10 + beta_out_boot[2];
+                
+                results[rep] = {y10 - y00, y11 - y01, y01 - y00, y11 - y10, y11 - y00};
+            } catch (const std::runtime_error& e) {
+                Rcpp::warning("Linear regression failed: %s Skipping this bootstrap replicate.", e.what());
+                --rep; // Retry this replicate
+            }
+        }
+        
+        return results;
+    }
+    
+    std::string format_results(const std::string& exposure_col, const std::string& mediator_col, const std::string& outcome_col,
+                               const std::vector<BootstrapResult>& results) {
+        std::string combination = exposure_col + "_" + mediator_col + "_" + outcome_col;
+        
+        std::vector<double> ind0_samples, ind1_samples, dir0_samples, dir1_samples, tot_samples;
+        ind0_samples.reserve(nrep);
+        ind1_samples.reserve(nrep);
+        dir0_samples.reserve(nrep);
+        dir1_samples.reserve(nrep);
+        tot_samples.reserve(nrep);
+        
+        for (const auto& result : results) {
+            ind0_samples.push_back(result.ind0);
+            ind1_samples.push_back(result.ind1);
+            dir0_samples.push_back(result.dir0);
+            dir1_samples.push_back(result.dir1);
+            tot_samples.push_back(result.tot);
+        }
+        
+        std::stringstream result_stream;
+        result_stream << std::fixed << std::setprecision(6);
+        result_stream << combination << ",";
+        write_statistics(result_stream, ind1_samples);
+        write_statistics(result_stream, ind0_samples);
+        write_statistics(result_stream, dir1_samples);
+        write_statistics(result_stream, dir0_samples);
+        write_statistics(result_stream, tot_samples);
+        result_stream << "\n";
+        
+        return result_stream.str();
+    }
+    
+    void write_statistics(std::stringstream& stream, const std::vector<double>& samples) {
+        stream << mean_cpp(samples) << "," << std_dev_cpp(samples) << ","
+               << percentile_cpp(samples, 2.5) << "," << percentile_cpp(samples, 97.5) << ","
+               << p_value_cpp(samples, 0.0) << ",";
     }
 };
 
 // [[Rcpp::export]]
 void mediation_analysis_cpp(NumericMatrix data,
                             CharacterVector column_names,
-                            CharacterVector exposure_cols,
-                            CharacterVector mediator_cols,
-                            CharacterVector outcome_cols,
                             DataFrame combinations,
                             int nrep,
                             std::string output_file) {
     try {
-        // Convert NumericMatrix to Eigen::MatrixXd and wrap in shared_ptr
-        std::shared_ptr<MatrixXd> data_eigen = std::make_shared<MatrixXd>(Rcpp::as<Eigen::Map<Eigen::MatrixXd>>(data));
+        if (data.nrow() == 0 || data.ncol() == 0) {
+            throw std::invalid_argument("Data matrix is empty");
+        }
+        if (column_names.size() != data.ncol()) {
+            throw std::invalid_argument("Column names size does not match data columns");
+        }
+        if (combinations.nrows() == 0) {
+            throw std::invalid_argument("Combinations dataframe is empty");
+        }
+        if (nrep <= 0) {
+            throw std::invalid_argument("Number of bootstrap replicates must be positive");
+        }
         
-        // Create FileHandler
-        std::shared_ptr<FileHandler> file_handler = std::make_shared<FileHandler>(output_file);
+        MatrixXd data_eigen = as<MatrixXd>(data);
+        std::vector<std::string> column_names_cpp = as<std::vector<std::string>>(column_names);
         
-        // Create worker and run parallel processing
-        MediationWorker worker(data_eigen, column_names, exposure_cols, mediator_cols, outcome_cols, nrep, combinations, file_handler);
+        std::vector<std::string> exposure_vec_cpp = as<std::vector<std::string>>(combinations["exposure"]);
+        std::vector<std::string> mediator_vec_cpp = as<std::vector<std::string>>(combinations["mediator"]);
+        std::vector<std::string> outcome_vec_cpp = as<std::vector<std::string>>(combinations["outcome"]);
+        
+        BufferedFileWriter writer(output_file, 10000);
+        
+        MediationWorker worker(data_eigen, column_names_cpp, nrep,
+                               exposure_vec_cpp, mediator_vec_cpp, outcome_vec_cpp, writer);
+        
         parallelFor(0, combinations.nrows(), worker);
         
-        // Ensure all writes are completed before function returns
-        file_handler->waitForCompletion();
+        writer.flush();
         
     } catch (const std::exception& e) {
-        Rcpp::stop(std::string("Error in mediation_analysis_cpp: ") + e.what());
+        Rcpp::stop("Error in mediation_analysis_cpp: %s", e.what());
     }
 }
