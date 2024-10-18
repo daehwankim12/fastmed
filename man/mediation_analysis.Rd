@@ -30,5 +30,34 @@ None.  The results are written to the specified `output_file` in CSV format.
 This function performs mediation analysis using bootstrap resampling to estimate direct, indirect, and total effects.  It processes data in chunks to handle large datasets efficiently and writes results directly to a CSV file.
 }
 \details{
-... (rest of the documentation remains the same)
+This function estimates the following effects:
+* **Indirect Effect (t1):**  The effect of the exposure on the outcome through the mediator when the exposure is set to its value at t=1 (typically meaning its presence or a higher level).
+* **Indirect Effect (t0):** The effect of the exposure on the outcome through the mediator when the exposure is set to its value at t=0 (typically meaning its absence or a lower level).
+* **Direct Effect (t1):** The effect of the exposure on the outcome not through the mediator when the exposure is set to t=1.
+* **Direct Effect (t0):** The effect of the exposure on the outcome not through the mediator when the exposure is set to t=0.
+* **Total Effect:**  The total effect of the exposure on the outcome, both direct and indirect.
+
+The output CSV file includes estimates, standard errors, 95% confidence intervals (LCB, UCB), and p-values for each effect and combination of variables.
+}
+\examples{
+\dontrun{
+# Example data (replace with your own data)
+my_data <- data.table(
+  Exposure_A = rnorm(1000),
+  Exposure_B = rnorm(1000),
+  Mediator_X = rnorm(1000),
+  Mediator_Y = rnorm(1000),
+  Outcome_1 = rnorm(1000),
+  Outcome_2 = rnorm(1000)
+)
+
+# Perform mediation analysis
+mediation_analysis(
+  data = my_data,
+  columns = list(exposure = "Exposure", mediator = "Mediator", outcome = "Outcome"),
+  nrep = 500, # Reduced for example speed
+  output_file = "mediation_results.csv"
+)
+}
+
 }

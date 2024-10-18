@@ -8,20 +8,22 @@
 
 ## Features
 
--   **Efficient Mediation Analysis:** Conduct mediation analysis with multiple exposure, mediator, and outcome variables.
--   **Parallel Processing:** Utilize multiple CPU cores to accelerate computations.
--   **Bootstrap Resampling:** Estimate direct, indirect, and total effects with confidence intervals and p-values.
--   **Customizable Column Prefixes:** Easily specify prefixes to identify exposure, mediator, and outcome variables.
--   **Scalable for Large Datasets:** Handle large-scale data efficiently by processing in chunks.
--   **Real-time CSV Output:** Save results directly to CSV files during analysis.
+- **Efficient Mediation Analysis:** Conduct mediation analysis with multiple exposure, mediator, and outcome variables.
+- **Parallel Processing:** Utilize multiple CPU cores to accelerate computations.
+- **Bootstrap Resampling:** Estimate direct, indirect, and total effects with confidence intervals and p-values.
+- **Customizable Column Prefixes:** Easily specify prefixes to identify exposure, mediator, and outcome variables.
+- **Scalable for Large Datasets:** Handle large-scale data efficiently by processing in chunks.
+- **Real-time CSV Output:** Save results directly to CSV files during analysis.
 
 ## Installation
 
 You can install the development version of **fastmed** from GitHub using the `devtools` package:
 
-``` r
+```r
 # Install devtools if not already installed
-install.packages("devtools")
+if (!requireNamespace("devtools", quietly = TRUE)) {
+  install.packages("devtools")
+}
 
 # Install fastmed from GitHub
 devtools::install_github("daehwankim12/fastmed")
@@ -29,23 +31,22 @@ devtools::install_github("daehwankim12/fastmed")
 
 ## Usage
 
-Below is an example of how to use the `mediation_analysis` function in fastmed.
+Here's a detailed example of how to use the `mediation_analysis` function in fastmed:
 
-### Example
-
-``` r
+```r
 library(fastmed)
 library(data.table)
 
 # Generate example data
 set.seed(123)
+n <- 1000
 my_data <- data.table(
-  Exposure_A1 = rnorm(1000),
-  Exposure_A2 = rnorm(1000),
-  Mediator_X1 = rnorm(1000),
-  Mediator_X2 = rnorm(1000),
-  Outcome_Y1 = rnorm(1000),
-  Outcome_Y2 = rnorm(1000)
+  Exposure_A1 = rnorm(n),
+  Exposure_A2 = rnorm(n),
+  Mediator_X1 = rnorm(n),
+  Mediator_X2 = rnorm(n),
+  Outcome_Y1 = rnorm(n),
+  Outcome_Y2 = rnorm(n)
 )
 
 # Define column prefixes
@@ -74,78 +75,52 @@ print(results)
 
 ### Parameters
 
--   `data`: A data.table or data.frame containing the dataset.
--   `columns`: A list with three named elements: exposure, mediator, and outcome. Each should be a character string specifying the prefix of the respective columns.
--   `nrep`: (Optional) Number of bootstrap replicates. Default is 1000.
--   `output_file`: Path to the output CSV file where results will be saved.
--   `num_threads`: (Optional) Number of threads for parallel processing. Defaults to the number of available cores.
+- `data`: A data.table or data.frame containing the dataset.
+- `columns`: A list with three named elements: exposure, mediator, and outcome. Each should be a character string specifying the prefix of the respective columns.
+- `nrep`: (Optional) Number of bootstrap replicates. Default is 1000.
+- `output_file`: Path to the output CSV file where results will be saved.
+- `num_threads`: (Optional) Number of threads for parallel processing. Defaults to the number of available cores.
 
 ### Output
 
-The output CSV file (`output_csv` in the example) will contain the following columns for each combination of exposure, mediator, and outcome variables:
+The output CSV file will contain detailed results for each combination of exposure, mediator, and outcome variables, including estimates, standard errors, confidence intervals, and p-values for indirect, direct, and total effects.
 
--   `combination`: Identifier for the combination (e.g., Exposure_A1_Mediator_X1_Outcome_Y1)
--   `indirect_t1_estimate`: Indirect effect estimate at t=1
--   `indirect_t1_std_err`: Standard error of the indirect effect at t=1
--   `indirect_t1_lcb`: Lower confidence bound for the indirect effect at t=1
--   `indirect_t1_ucb`: Upper confidence bound for the indirect effect at t=1
--   `indirect_t1_p_value`: P-value for the indirect effect at t=1
--   `indirect_t0_estimate`: Indirect effect estimate at t=0
--   `indirect_t0_std_err`: Standard error of the indirect effect at t=0
--   `indirect_t0_lcb`: Lower confidence bound for the indirect effect at t=0
--   `indirect_t0_ucb`: Upper confidence bound for the indirect effect at t=0
--   `indirect_t0_p_value`: P-value for the indirect effect at t=0
--   `direct_t1_estimate`: Direct effect estimate at t=1
--   `direct_t1_std_err`: Standard error of the direct effect at t=1
--   `direct_t1_lcb`: Lower confidence bound for the direct effect at t=1
--   `direct_t1_ucb`: Upper confidence bound for the direct effect at t=1
--   `direct_t1_p_value`: P-value for the direct effect at t=1
--   `direct_t0_estimate`: Direct effect estimate at t=0
--   `direct_t0_std_err`: Standard error of the direct effect at t=0
--   `direct_t0_lcb`: Lower confidence bound for the direct effect at t=0
--   `direct_t0_ucb`: Upper confidence bound for the direct effect at t=0
--   `direct_t0_p_value`: P-value for the direct effect at t=0
--   `total_effect_estimate`: Total effect estimate
--   `total_effect_std_err`: Standard error of the total effect
--   `total_effect_lcb`: Lower confidence bound for the total effect
--   `total_effect_ucb`: Upper confidence bound for the total effect
--   `total_effect_p_value`: P-value for the total effect
+## Performance Considerations
 
-## Development
+- The package is optimized for parallel processing. Increase `num_threads` to utilize more CPU cores.
+- For very large datasets, consider splitting the analysis into smaller chunks and combining the results.
+- Monitor memory usage, especially when increasing `nrep` for bootstrap resampling.
 
-If you wish to contribute to fastmed, please follow these guidelines:
+## Troubleshooting
 
-1.  Fork the repository on GitHub.
-2.  Create a new branch for your feature or bugfix.
-3.  Commit your changes with clear messages.
-4.  Push your branch to your forked repository.
-5.  Submit a pull request detailing your changes.
+If you encounter issues:
 
-## Testing
-
-fastmed includes a suite of tests to ensure functionality. To run the tests, use the following commands:
-
-``` r
-library(devtools)
-library(testthat)
-
-# Navigate to the package directory
-setwd("path/to/fastmed")
-
-# Run tests
-devtools::test()
-```
+1. Ensure you have the latest version of fastmed installed.
+2. Check that all dependencies are up to date.
+3. For performance issues, try adjusting `num_threads` or reducing `nrep`.
+4. If you encounter a bug, please [open an issue](https://github.com/daehwankim12/fastmed/issues) with a reproducible example.
 
 ## License
 
-This project is licensed under the MIT License. See the LICENSE file for details.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 ## Acknowledgements
 
--   Rcpp
--   RcppParallel
--   data.table
+fastmed builds upon several powerful R packages:
+
+- [Rcpp](https://www.rcpp.org/) for C++ integration
+- [RcppParallel](https://rcppcore.github.io/RcppParallel/) for parallel processing
+- [data.table](https://rdatatable.gitlab.io/data.table/) for efficient data manipulation
+
+## Citation
+
+If you use fastmed in your research, please cite it as follows:
+
+```
+Kim, D. (2024). fastmed: Fast Mediation Analysis in R. R package version 0.1.0.
+https://github.com/daehwankim12/fastmed
+```
 
 ## Contact
 
-For any questions or suggestions, please open an issue on the GitHub repository.
+For questions, suggestions, or collaborations, please [open an issue](https://github.com/daehwankim12/fastmed/issues) on the GitHub repository or contact the package maintainer at [maintainer@email.com](mailto:maintainer@email.com).

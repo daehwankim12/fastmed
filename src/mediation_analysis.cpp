@@ -127,10 +127,11 @@ class MediationWorker : public Worker {
 private:
     const MatrixXd& data;
     const std::vector<std::string>& column_names;
+    const int nrep;
     const std::vector<std::string>& exposure_vec;
     const std::vector<std::string>& mediator_vec;
     const std::vector<std::string>& outcome_vec;
-    const int nrep;
+
     std::unordered_map<std::string, int> column_index_map;
     BufferedFileWriter& writer;
     
