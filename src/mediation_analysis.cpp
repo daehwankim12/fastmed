@@ -67,12 +67,11 @@ VectorXd linear_regression(const MatrixXd& X, const VectorXd& y) {
     if (X.rows() != y.rows()) {
         throw std::runtime_error("Mismatch in number of rows between X and y");
     }
-    JacobiSVD<MatrixXd> svd(X.transpose() * X);
-    double cond = svd.singularValues()(0) / svd.singularValues()(svd.singularValues().size() - 1);
-    if (cond > 1e10) {
+    Eigen::LDLT<MatrixXd> ldlt(X.transpose() * X);
+    if (ldlt.rcond() < 1e-10) {
         throw std::runtime_error("Matrix is (near) singular");
     }
-    return (X.transpose() * X).ldlt().solve(X.transpose() * y);
+    return ldlt.solve(X.transpose() * y);
 }
 
 class BufferedFileWriter {
@@ -123,6 +122,10 @@ private:
     }
 };
 
+struct BootstrapResult {
+    double ind0, ind1, dir0, dir1, tot;
+};
+
 class MediationWorker : public Worker {
 private:
     const MatrixXd& data;
@@ -131,19 +134,9 @@ private:
     const std::vector<std::string>& exposure_vec;
     const std::vector<std::string>& mediator_vec;
     const std::vector<std::string>& outcome_vec;
-
+    
     std::unordered_map<std::string, int> column_index_map;
     BufferedFileWriter& writer;
-    
-    VectorXd boot_exposure;
-    VectorXd boot_mediator;
-    VectorXd boot_outcome;
-    MatrixXd X_med_boot;
-    MatrixXd X_out_boot;
-    
-    struct BootstrapResult {
-        double ind0, ind1, dir0, dir1, tot;
-    };
     
 public:
     MediationWorker(const MatrixXd& data_,
@@ -155,9 +148,7 @@ public:
                     BufferedFileWriter& writer_)
         : data(data_), column_names(column_names_), nrep(nrep_),
           exposure_vec(exposure_vec_), mediator_vec(mediator_vec_), outcome_vec(outcome_vec_),
-          writer(writer_),
-          boot_exposure(data_.rows()), boot_mediator(data_.rows()), boot_outcome(data_.rows()),
-          X_med_boot(data_.rows(), 2), X_out_boot(data_.rows(), 3) {
+          writer(writer_) {
         for (size_t c = 0; c < column_names.size(); ++c) {
             column_index_map[column_names[c]] = c;
         }
@@ -169,6 +160,8 @@ public:
             std::uniform_int_distribution<> dis(0, data.rows() - 1);
             
             for (std::size_t idx = begin; idx < end; ++idx) {
+                if (idx >= exposure_vec.size()) break;  // Ensure we don't go out of bounds
+                
                 std::string result = process_combination(idx, gen, dis);
                 writer.write(result);
             }
@@ -206,19 +199,26 @@ private:
     
     std::vector<BootstrapResult> perform_bootstrap(const VectorXd& exposure, const VectorXd& mediator, const VectorXd& outcome,
                                                    std::mt19937& gen, std::uniform_int_distribution<>& dis) {
-        std::vector<BootstrapResult> results(nrep);
+        std::vector<BootstrapResult> results;
+        results.reserve(nrep);
         
         for (int rep = 0; rep < nrep; ++rep) {
-            for (int m = 0; m < data.rows(); ++m) {
+            VectorXd boot_exposure(exposure.size());
+            VectorXd boot_mediator(mediator.size());
+            VectorXd boot_outcome(outcome.size());
+            
+            for (int m = 0; m < exposure.size(); ++m) {
                 int sample_idx = dis(gen);
                 boot_exposure[m] = exposure[sample_idx];
                 boot_mediator[m] = mediator[sample_idx];
                 boot_outcome[m] = outcome[sample_idx];
             }
             
+            MatrixXd X_med_boot(exposure.size(), 2);
             X_med_boot.col(0).setOnes();
             X_med_boot.col(1) = boot_exposure;
             
+            MatrixXd X_out_boot(exposure.size(), 3);
             X_out_boot.col(0).setOnes();
             X_out_boot.col(1) = boot_mediator;
             X_out_boot.col(2) = boot_exposure;
@@ -234,7 +234,7 @@ private:
                 double y01 = y00 + beta_out_boot[2];
                 double y11 = y10 + beta_out_boot[2];
                 
-                results[rep] = {y10 - y00, y11 - y01, y01 - y00, y11 - y10, y11 - y00};
+                results.push_back({y10 - y00, y11 - y01, y01 - y00, y11 - y10, y11 - y00});
             } catch (const std::runtime_error& e) {
                 Rcpp::warning("Linear regression failed: %s Skipping this bootstrap replicate.", e.what());
                 --rep; // Retry this replicate
@@ -248,29 +248,25 @@ private:
                                const std::vector<BootstrapResult>& results) {
         std::string combination = exposure_col + "_" + mediator_col + "_" + outcome_col;
         
-        std::vector<double> ind0_samples, ind1_samples, dir0_samples, dir1_samples, tot_samples;
-        ind0_samples.reserve(nrep);
-        ind1_samples.reserve(nrep);
-        dir0_samples.reserve(nrep);
-        dir1_samples.reserve(nrep);
-        tot_samples.reserve(nrep);
+        std::vector<double> acme_samples, ade_samples, total_samples;
+        acme_samples.reserve(nrep);
+        ade_samples.reserve(nrep);
+        total_samples.reserve(nrep);
         
         for (const auto& result : results) {
-            ind0_samples.push_back(result.ind0);
-            ind1_samples.push_back(result.ind1);
-            dir0_samples.push_back(result.dir0);
-            dir1_samples.push_back(result.dir1);
-            tot_samples.push_back(result.tot);
+            acme_samples.push_back(result.ind0);  // ACME
+            ade_samples.push_back(result.dir0);   // ADE
+            total_samples.push_back(result.tot);  // Total effect
         }
         
         std::stringstream result_stream;
         result_stream << std::fixed << std::setprecision(6);
         result_stream << combination << ",";
-        write_statistics(result_stream, ind1_samples);
-        write_statistics(result_stream, ind0_samples);
-        write_statistics(result_stream, dir1_samples);
-        write_statistics(result_stream, dir0_samples);
-        write_statistics(result_stream, tot_samples);
+        write_statistics(result_stream, acme_samples);
+        result_stream << ",";
+        write_statistics(result_stream, ade_samples);
+        result_stream << ",";
+        write_statistics(result_stream, total_samples);
         result_stream << "\n";
         
         return result_stream.str();
@@ -279,7 +275,7 @@ private:
     void write_statistics(std::stringstream& stream, const std::vector<double>& samples) {
         stream << mean_cpp(samples) << "," << std_dev_cpp(samples) << ","
                << percentile_cpp(samples, 2.5) << "," << percentile_cpp(samples, 97.5) << ","
-               << p_value_cpp(samples, 0.0) << ",";
+               << p_value_cpp(samples, 0.0);
     }
 };
 
@@ -310,7 +306,14 @@ void mediation_analysis_cpp(NumericMatrix data,
         std::vector<std::string> mediator_vec_cpp = as<std::vector<std::string>>(combinations["mediator"]);
         std::vector<std::string> outcome_vec_cpp = as<std::vector<std::string>>(combinations["outcome"]);
         
-        BufferedFileWriter writer(output_file, 10000);
+        BufferedFileWriter writer(output_file, 1000);
+        
+        // 열 이름을 직접 파일에 쓰기
+        std::string header = "Combination,ACME_Mean,ACME_SD,ACME_2.5%,ACME_97.5%,ACME_p-value,"
+        "ADE_Mean,ADE_SD,ADE_2.5%,ADE_97.5%,ADE_p-value,"
+        "Total_Effect_Mean,Total_Effect_SD,Total_Effect_2.5%,Total_Effect_97.5%,Total_Effect_p-value\n";
+        writer.write(header);
+        writer.flush();
         
         MediationWorker worker(data_eigen, column_names_cpp, nrep,
                                exposure_vec_cpp, mediator_vec_cpp, outcome_vec_cpp, writer);
