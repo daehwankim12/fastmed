@@ -123,4 +123,4 @@ https://github.com/daehwankim12/fastmed
 
 ## Contact
 
-For questions, suggestions, or collaborations, please [open an issue](https://github.com/daehwankim12/fastmed/issues) on the GitHub repository or contact the package maintainer at [maintainer@email.com](mailto:maintainer@email.com).
+For questions, suggestions, or collaborations, please [open an issue](https://github.com/daehwankim12/fastmed/issues) on the GitHub repository or contact the package maintainer at [kdh5358@snu.ac.kr](mailto:kdh5358@snu.ac.kr).
