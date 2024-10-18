@@ -7,6 +7,7 @@
 #' @param nrep An integer specifying the number of bootstrap replicates to perform.  Higher values generally lead to more stable estimates but increase computation time. Default is 1000.
 #' @param output_file A character string specifying the path to the output CSV file.  Results are written to this file in real-time.  The file will be overwritten if it already exists.
 #' @param num_threads An integer specifying the number of threads to use for parallel processing.  Default is the number of available cores detected by `parallel::detectCores()`.
+#' @param pert A character string specifying the method to use for calculating standard errors and confidence intervals.  Options are `"asymptotic"` and `"bootstrap"`.  The `"bootstrap"` method is more computationally intensive but may provide more accurate results for small sample sizes. If your data is non-parametric, the `"bootstrap"` method is recommended. Default is `"asymptotic"`.
 #' @return None.  The results are written to the specified `output_file` in CSV format.
 #'
 #' @details This function estimates the following effects:
@@ -48,11 +49,25 @@ mediation_analysis <- function(data,
                                columns,
                                nrep = 1000,
                                output_file,
-                               num_threads = parallel::detectCores()) {
+                               num_threads = parallel::detectCores(),
+                               pert = "asymptotic") {
+  stopifnot(nrep > 0, 
+            is.character(output_file), 
+            is.list(columns) && length(columns) == 3,
+            pert %in% c("asymptotic", "bootstrap"))
+  
   # Ensure data is a data.table
   if (!data.table::is.data.table(data)) {
     data <- data.table::as.data.table(data)
   }
+  
+  data <- data[, lapply(.SD, function(col) {
+    if (is.integer(col)) {
+      as.numeric(col)
+    } else {
+      col
+    }
+  })]
   
   # Set number of threads for RcppParallel
   RcppParallel::setThreadOptions(numThreads = num_threads)
@@ -96,7 +111,8 @@ mediation_analysis <- function(data,
     colnames(data),
     combinations,
     nrep,
-    output_file
+    output_file,
+    pert
   )
   
   cat(

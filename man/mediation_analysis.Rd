@@ -9,7 +9,8 @@ mediation_analysis(
   columns,
   nrep = 1000,
   output_file,
-  num_threads = parallel::detectCores()
+  num_threads = parallel::detectCores(),
+  pert = "asymptotic"
 )
 }
 \arguments{
@@ -22,6 +23,8 @@ mediation_analysis(
 \item{output_file}{A character string specifying the path to the output CSV file.  Results are written to this file in real-time.  The file will be overwritten if it already exists.}
 
 \item{num_threads}{An integer specifying the number of threads to use for parallel processing.  Default is the number of available cores detected by `parallel::detectCores()`.}
+
+\item{pert}{A character string specifying the method to use for calculating standard errors and confidence intervals.  Options are `"asymptotic"` and `"bootstrap"`.  The `"bootstrap"` method is more computationally intensive but may provide more accurate results for small sample sizes. If your data is non-parametric, the `"bootstrap"` method is recommended. Default is `"asymptotic"`.}
 }
 \value{
 None.  The results are written to the specified `output_file` in CSV format.

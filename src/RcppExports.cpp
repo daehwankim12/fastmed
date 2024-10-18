@@ -12,8 +12,8 @@ Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
 // mediation_analysis_cpp
-void mediation_analysis_cpp(NumericMatrix data, CharacterVector column_names, DataFrame combinations, int nrep, std::string output_file);
-RcppExport SEXP _fastmed_mediation_analysis_cpp(SEXP dataSEXP, SEXP column_namesSEXP, SEXP combinationsSEXP, SEXP nrepSEXP, SEXP output_fileSEXP) {
+void mediation_analysis_cpp(NumericMatrix data, CharacterVector column_names, DataFrame combinations, int nrep, std::string output_file, std::string pert);
+RcppExport SEXP _fastmed_mediation_analysis_cpp(SEXP dataSEXP, SEXP column_namesSEXP, SEXP combinationsSEXP, SEXP nrepSEXP, SEXP output_fileSEXP, SEXP pertSEXP) {
 BEGIN_RCPP
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< NumericMatrix >::type data(dataSEXP);
@@ -21,13 +21,14 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< DataFrame >::type combinations(combinationsSEXP);
     Rcpp::traits::input_parameter< int >::type nrep(nrepSEXP);
     Rcpp::traits::input_parameter< std::string >::type output_file(output_fileSEXP);
-    mediation_analysis_cpp(data, column_names, combinations, nrep, output_file);
+    Rcpp::traits::input_parameter< std::string >::type pert(pertSEXP);
+    mediation_analysis_cpp(data, column_names, combinations, nrep, output_file, pert);
     return R_NilValue;
 END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_fastmed_mediation_analysis_cpp", (DL_FUNC) &_fastmed_mediation_analysis_cpp, 5},
+    {"_fastmed_mediation_analysis_cpp", (DL_FUNC) &_fastmed_mediation_analysis_cpp, 6},
     {NULL, NULL, 0}
 };
 
