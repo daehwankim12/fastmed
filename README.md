@@ -17,16 +17,16 @@
 
 ## Installation
 
-You can install the development version of **fastmed** from GitHub using the `devtools` package:
+You can install the development version of **fastmed** from GitHub using the `remotes` package:
 
 ```r
-# Install devtools if not already installed
-if (!requireNamespace("devtools", quietly = TRUE)) {
-  install.packages("devtools")
+# Install remotes if not already installed
+if (!requireNamespace("remotes", quietly = TRUE)) {
+  install.packages("remotes")
 }
 
 # Install fastmed from GitHub
-devtools::install_github("daehwankim12/fastmed")
+remotes::install_github("daehwankim12/fastmed")
 ```
 
 ## Usage
@@ -123,4 +123,4 @@ https://github.com/daehwankim12/fastmed
 
 ## Contact
 
-For questions, suggestions, or collaborations, please [open an issue](https://github.com/daehwankim12/fastmed/issues) on the GitHub repository or contact the package maintainer at [maintainer@email.com](mailto:maintainer@email.com).
+For questions, suggestions, or collaborations, please [open an issue](https://github.com/daehwankim12/fastmed/issues) on the GitHub repository or contact the package maintainer at [kdh5358@snu.ac.kr](mailto:kdh5358@snu.ac.kr).
