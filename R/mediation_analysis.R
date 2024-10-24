@@ -39,7 +39,7 @@
 #'   output_file = "mediation_results.csv"
 #' )
 #' }
-#' 
+#'
 #' @import data.table Rcpp
 #' @importFrom Rcpp evalCpp
 #' @importFrom RcppParallel setThreadOptions
@@ -51,16 +51,34 @@ mediation_analysis <- function(data,
                                output_file,
                                num_threads = parallel::detectCores(),
                                pert = "asymptotic") {
-  stopifnot(nrep > 0, 
-            is.character(output_file), 
-            is.list(columns) && length(columns) == 3,
-            pert %in% c("asymptotic", "bootstrap"))
+  stopifnot(
+    nrep > 0,
+    is.character(output_file),
+    is.list(columns) && length(columns) == 3,
+    pert %in% c("asymptotic", "bootstrap")
+  )
   
+  if (data.table::is.data.table(data)) {
+    data <- data.frame(data)
+  } else if (!is.data.frame(data)) {
+    stop("Data must be a data.table or data.frame.")
+  }
+  
+  if (class(data[, 1]) == "character") {
+    data_row_names <- data[, 1]
+    data <- data[, -1]
+    rownames(data) <- data_row_names
+  }
+
   # Ensure data is a data.table
   if (!data.table::is.data.table(data)) {
     data <- data.table::as.data.table(data)
   }
   
+  if (nrow(data) == 0) {
+    stop("Data is empty.")
+  }
+
   data <- data[, lapply(.SD, function(col) {
     if (is.integer(col)) {
       as.numeric(col)
@@ -68,29 +86,29 @@ mediation_analysis <- function(data,
       col
     }
   })]
-  
+
   # Set number of threads for RcppParallel
   RcppParallel::setThreadOptions(numThreads = num_threads)
-  
+
   # Function to find columns that start with given prefixes
   find_columns <- function(prefixes, all_columns) {
     unique(unlist(lapply(prefixes, function(prefix) {
       grep(paste0("^", prefix), all_columns, value = TRUE)
     })))
   }
-  
+
   # Find actual column names based on prefixes
   all_columns <- names(data)
   exposure_cols <- find_columns(columns$exposure, all_columns)
   mediator_cols <- find_columns(columns$mediator, all_columns)
   outcome_cols <- find_columns(columns$outcome, all_columns)
-  
+
   # Check if columns were found
   if (length(exposure_cols) == 0 ||
-      length(mediator_cols) == 0 || length(outcome_cols) == 0) {
+    length(mediator_cols) == 0 || length(outcome_cols) == 0) {
     stop("No columns found for one or more of exposure, mediator, or outcome.")
   }
-  
+
   # Generate all combinations
   combinations <- expand.grid(
     exposure = exposure_cols,
@@ -98,13 +116,13 @@ mediation_analysis <- function(data,
     outcome = outcome_cols,
     stringsAsFactors = FALSE
   )
-  
+
   # Check uniqueness of column names
   unique_cols <- unique(c(exposure_cols, mediator_cols, outcome_cols))
   if (length(unique_cols) < length(c(exposure_cols, mediator_cols, outcome_cols))) {
     stop("Column names must be unique across exposure, mediator, and outcome variables.")
   }
-  
+
   # Call C++ function
   mediation_analysis_cpp(
     as.matrix(data),
@@ -114,7 +132,7 @@ mediation_analysis <- function(data,
     output_file,
     pert
   )
-  
+
   cat(
     "Mediation analysis completed. Results saved to",
     output_file,

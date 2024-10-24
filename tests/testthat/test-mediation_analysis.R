@@ -9,22 +9,22 @@ test_that("mediation_analysis works correctly with default prefixes", {
     CORTEX1 = rnorm(50),
     CORTEX2 = rnorm(50)
   )
-  
+
   # Use local_tempfile to create a temporary output CSV file
   output_csv <- withr::local_tempfile(fileext = ".csv")
-  
+
   # Run mediation_analysis function
   mediation_analysis(
     data = test_data_default,
     columns = list(exposure = c("CECUM"), mediator = c("SERUM"), outcome = c("CORTEX")),
     nrep = 100, # Reduced for faster testing
-    output_file = output_csv,  # Use the temporary file name
+    output_file = output_csv, # Use the temporary file name
     num_threads = 1 # Adjust thread count for testing environment
   )
-  
+
   # Read results
   results <- data.table::fread(output_csv)
-  
+
   # Expected result: 2 (CECUM) * 2 (SERUM) * 2 (CORTEX) = 8 combinations
   expect_equal(nrow(results), 8)
 })
@@ -40,22 +40,22 @@ test_that("mediation_analysis works correctly with custom prefixes", {
     OUT1 = rnorm(50),
     OUT2 = rnorm(50)
   )
-  
+
   # Use local_tempfile to create a temporary output CSV file
   output_csv <- withr::local_tempfile(fileext = ".csv")
-  
+
   # Run mediation_analysis function
   mediation_analysis(
     data = test_data_custom,
     columns = list(exposure = c("EXP"), mediator = c("MED"), outcome = c("OUT")),
     nrep = 100, # Reduced for faster testing
-    output_file = output_csv,  # Use the temporary file name
+    output_file = output_csv, # Use the temporary file name
     num_threads = 1 # Adjust thread count for testing environment
   )
-  
+
   # Read results
   results <- data.table::fread(output_csv)
-  
+
   # Expected result: 2 (EXP) * 2 (MED) * 2 (OUT) = 8 combinations
   expect_equal(nrow(results), 8)
 })
@@ -71,22 +71,22 @@ test_that("mediation_analysis handles large datasets correctly", {
     CORTEX1 = rnorm(1000),
     CORTEX2 = rnorm(1000)
   )
-  
+
   # Use local_tempfile to create a temporary output CSV file
   output_csv <- withr::local_tempfile(fileext = ".csv")
-  
+
   # Run mediation_analysis function
   mediation_analysis(
     data = test_data_large,
     columns = list(exposure = c("CECUM"), mediator = c("SERUM"), outcome = c("CORTEX")),
     nrep = 100, # Reduced for faster testing
-    output_file = output_csv,  # Use the temporary file name
+    output_file = output_csv, # Use the temporary file name
     num_threads = 1 # Adjust thread count for testing environment
   )
-  
+
   # Read results
   results <- data.table::fread(output_csv)
-  
+
   # Expected result: 2 (CECUM) * 2 (SERUM) * 2 (CORTEX) = 8 combinations
   expect_equal(nrow(results), 8)
 })
@@ -102,22 +102,22 @@ test_that("mediation_analysis works correctly with multiple threads", {
     CORTEX1 = rnorm(1000),
     CORTEX2 = rnorm(1000)
   )
-  
+
   # Use local_tempfile to create a temporary output CSV file
   output_csv <- withr::local_tempfile(fileext = ".csv")
-  
+
   # Run mediation_analysis function
   mediation_analysis(
     data = test_data_large,
     columns = list(exposure = c("CECUM"), mediator = c("SERUM"), outcome = c("CORTEX")),
     nrep = 100, # Reduced for faster testing
-    output_file = output_csv,  # Use the temporary file name
+    output_file = output_csv, # Use the temporary file name
     num_threads = 4 # Adjust thread count for testing environment
   )
-  
+
   # Read results
   results <- data.table::fread(output_csv)
-  
+
   # Expected result: 2 (CECUM) * 2 (SERUM) * 2 (CORTEX) = 8 combinations
   expect_equal(nrow(results), 8)
 })
