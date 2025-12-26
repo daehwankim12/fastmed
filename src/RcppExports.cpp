@@ -30,8 +30,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // mediation_analysis_cpp
-void mediation_analysis_cpp(NumericMatrix data, CharacterVector column_names, DataFrame combinations, int nrep, std::string output_file, std::string pert, uint64_t base_seed, bool append);
-RcppExport SEXP _fastmed_mediation_analysis_cpp(SEXP dataSEXP, SEXP column_namesSEXP, SEXP combinationsSEXP, SEXP nrepSEXP, SEXP output_fileSEXP, SEXP pertSEXP, SEXP base_seedSEXP, SEXP appendSEXP) {
+void mediation_analysis_cpp(NumericMatrix data, CharacterVector column_names, DataFrame combinations, int nrep, std::string output_file, std::string pert, uint64_t base_seed, bool append, std::string mediator_family, std::string outcome_family, bool replace_outcome);
+RcppExport SEXP _fastmed_mediation_analysis_cpp(SEXP dataSEXP, SEXP column_namesSEXP, SEXP combinationsSEXP, SEXP nrepSEXP, SEXP output_fileSEXP, SEXP pertSEXP, SEXP base_seedSEXP, SEXP appendSEXP, SEXP mediator_familySEXP, SEXP outcome_familySEXP, SEXP replace_outcomeSEXP) {
 BEGIN_RCPP
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< NumericMatrix >::type data(dataSEXP);
@@ -42,7 +42,10 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< std::string >::type pert(pertSEXP);
     Rcpp::traits::input_parameter< uint64_t >::type base_seed(base_seedSEXP);
     Rcpp::traits::input_parameter< bool >::type append(appendSEXP);
-    mediation_analysis_cpp(data, column_names, combinations, nrep, output_file, pert, base_seed, append);
+    Rcpp::traits::input_parameter< std::string >::type mediator_family(mediator_familySEXP);
+    Rcpp::traits::input_parameter< std::string >::type outcome_family(outcome_familySEXP);
+    Rcpp::traits::input_parameter< bool >::type replace_outcome(replace_outcomeSEXP);
+    mediation_analysis_cpp(data, column_names, combinations, nrep, output_file, pert, base_seed, append, mediator_family, outcome_family, replace_outcome);
     return R_NilValue;
 END_RCPP
 }
@@ -98,7 +101,7 @@ END_RCPP
 
 static const R_CallMethodDef CallEntries[] = {
     {"_fastmed_glm_fit_cpp", (DL_FUNC) &_fastmed_glm_fit_cpp, 8},
-    {"_fastmed_mediation_analysis_cpp", (DL_FUNC) &_fastmed_mediation_analysis_cpp, 8},
+    {"_fastmed_mediation_analysis_cpp", (DL_FUNC) &_fastmed_mediation_analysis_cpp, 11},
     {"_fastmed_fastmed_test_p_value_cpp", (DL_FUNC) &_fastmed_fastmed_test_p_value_cpp, 1},
     {"_fastmed_fastmed_test_calculate_statistics_cpp", (DL_FUNC) &_fastmed_fastmed_test_calculate_statistics_cpp, 1},
     {"_fastmed_fastmed_test_two_bootstrap_samples", (DL_FUNC) &_fastmed_fastmed_test_two_bootstrap_samples, 4},

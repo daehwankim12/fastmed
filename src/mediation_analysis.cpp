@@ -99,6 +99,75 @@ double pval_mediate(const std::vector<double>& sims, double estimate) {
     return (p > 1.0 ? 1.0 : p);
 }
 
+static inline double inv_logit(double x) {
+    if (x >= 0.0) {
+        double z = std::exp(-x);
+        return 1.0 / (1.0 + z);
+    }
+    double z = std::exp(x);
+    return z / (1.0 + z);
+}
+
+static inline double safe_exp(double x) {
+    if (x > 700.0) {
+        x = 700.0;
+    }
+    if (x < -700.0) {
+        x = -700.0;
+    }
+    return std::exp(x);
+}
+
+static inline double linkinv(double eta, GlmFamily fam) {
+    if (fam == GlmFamily::Gaussian) {
+        return eta;
+    }
+    if (fam == GlmFamily::Binomial) {
+        return inv_logit(eta);
+    }
+    return safe_exp(eta);  // Poisson
+}
+
+static inline void simulate_mediator_draw(GlmFamily fam_m,
+                                         double eta0,
+                                         double eta1,
+                                         double sigma2_m,
+                                         std::mt19937_64& rng,
+                                         VectorXd& M0,
+                                         VectorXd& M1) {
+    const int n = static_cast<int>(M0.size());
+    if (M1.size() != n) {
+        throw std::runtime_error("simulate_mediator_draw: size mismatch");
+    }
+
+    if (fam_m == GlmFamily::Gaussian) {
+        double sd = std::sqrt(std::max(0.0, sigma2_m));
+        std::normal_distribution<double> nd(0.0, sd);
+        for (int i = 0; i < n; ++i) {
+            double e = nd(rng);  // SAME noise for both conditions
+            M0[i] = eta0 + e;
+            M1[i] = eta1 + e;
+        }
+    } else if (fam_m == GlmFamily::Binomial) {
+        double p0 = inv_logit(eta0);
+        double p1 = inv_logit(eta1);
+        std::uniform_real_distribution<double> unif(0.0, 1.0);
+        for (int i = 0; i < n; ++i) {
+            M0[i] = (unif(rng) < p0) ? 1.0 : 0.0;
+            M1[i] = (unif(rng) < p1) ? 1.0 : 0.0;
+        }
+    } else {  // Poisson
+        double lam0 = safe_exp(eta0);
+        double lam1 = safe_exp(eta1);
+        std::poisson_distribution<int> p0(lam0);
+        std::poisson_distribution<int> p1(lam1);
+        for (int i = 0; i < n; ++i) {
+            M0[i] = static_cast<double>(p0(rng));
+            M1[i] = static_cast<double>(p1(rng));
+        }
+    }
+}
+
 uint64_t derive_seed(uint64_t base_seed,
                      uint64_t global_combination_idx,
                      uint64_t rep_idx) {
@@ -231,6 +300,9 @@ private:
     const std::vector<std::string>& outcome_vec;
     const std::vector<uint64_t>& global_indices;
     std::string pert_method;
+    const std::string mediator_family;
+    const std::string outcome_family;
+    const bool replace_outcome;
     const uint64_t base_seed;
     const size_t chunk_begin;
     std::vector<std::string>& output_lines;
@@ -246,6 +318,9 @@ public:
                     const std::vector<std::string>& outcome_vec_,
                     const std::vector<uint64_t>& global_indices_,
                     const std::string& pert_method_,
+                    const std::string& mediator_family_,
+                    const std::string& outcome_family_,
+                    bool replace_outcome_,
                     uint64_t base_seed_,
                     size_t chunk_begin_,
                     std::vector<std::string>& output_lines_,
@@ -259,6 +334,9 @@ public:
           outcome_vec(outcome_vec_),
           global_indices(global_indices_),
           pert_method(pert_method_),
+          mediator_family(mediator_family_),
+          outcome_family(outcome_family_),
+          replace_outcome(replace_outcome_),
           base_seed(base_seed_),
           chunk_begin(chunk_begin_),
           output_lines(output_lines_),
@@ -299,28 +377,100 @@ private:
         VectorXd mediator = data.col(med_idx);
         VectorXd outcome = data.col(out_idx);
         
-        // Fit initial models
-        MatrixXd X_med(exposure.size(), 2);
+        const int n = static_cast<int>(exposure.size());
+        const int p_med = 2;
+        const int p_out = 3;
+        if (n <= p_med) {
+            throw std::runtime_error(
+                "Insufficient observations for mediator model: n must be > p_med");
+        }
+        if (n <= p_out) {
+            throw std::runtime_error(
+                "Insufficient observations for outcome model: n must be > p_out");
+        }
+
+        GlmFamily fam_m = parse_family_or_auto(mediator_family, mediator);
+        GlmFamily fam_y = parse_family_or_auto(outcome_family, outcome);
+
+        VectorXd prior_w = VectorXd::Ones(n);
+        VectorXd off_m = VectorXd::Zero(n);
+        VectorXd off_y = VectorXd::Zero(n);
+
+        // Fit mediator and outcome models
+        MatrixXd X_med(n, 2);
         X_med.col(0).setOnes();
         X_med.col(1) = exposure;
-        VectorXd beta_med = linear_regression(X_med, mediator);
         
-        MatrixXd X_out(exposure.size(), 3);
+        MatrixXd X_out(n, 3);
         X_out.col(0).setOnes();
         X_out.col(1) = mediator;
         X_out.col(2) = exposure;
-        VectorXd beta_out = linear_regression(X_out, outcome);
+
+        const int glm_maxit = 25;
+        const double glm_epsilon = 1e-8;
+        const double glm_qr_tol = 1e-12;
+
+        GlmFit fit_m;
+        try {
+            fit_m = glm_fit_irls_qr(X_med,
+                                    mediator,
+                                    fam_m,
+                                    prior_w,
+                                    off_m,
+                                    glm_maxit,
+                                    glm_epsilon,
+                                    glm_qr_tol);
+        } catch (const std::exception& e) {
+            std::string msg = e.what();
+            if (msg.find("rank deficient") != std::string::npos) {
+                throw std::runtime_error(
+                    "Cholesky decomposition failed for mediator model design matrix");
+            }
+            throw;
+        }
+
+        GlmFit fit_y;
+        try {
+            fit_y = glm_fit_irls_qr(X_out,
+                                    outcome,
+                                    fam_y,
+                                    prior_w,
+                                    off_y,
+                                    glm_maxit,
+                                    glm_epsilon,
+                                    glm_qr_tol);
+        } catch (const std::exception& e) {
+            std::string msg = e.what();
+            if (msg.find("rank deficient") != std::string::npos) {
+                throw std::runtime_error(
+                    "Cholesky decomposition failed for outcome model design matrix");
+            }
+            throw;
+        }
         
         std::vector<BootstrapResult> bootstrap_results;
         
         if (pert_method == "asymptotic") {
             bootstrap_results = perform_bootstrap_asymptotic(
-                X_med, X_out, beta_med, beta_out, mediator, outcome,
-                global_combination_idx);
+                fit_m,
+                fit_y,
+                fam_m,
+                fam_y,
+                n,
+                global_combination_idx,
+                exposure,
+                outcome,
+                replace_outcome);
         } else if (pert_method == "bootstrap") {
-            bootstrap_results = perform_bootstrap_resample(exposure, mediator,
-                                                           outcome,
-                                                           global_combination_idx);
+            bootstrap_results =
+                perform_bootstrap_resample(exposure,
+                                           mediator,
+                                           outcome,
+                                           fam_m,
+                                           fam_y,
+                                           n,
+                                           global_combination_idx,
+                                           replace_outcome);
         } else {
             throw std::invalid_argument("Unknown perturbation method: " +
                                         pert_method);
@@ -339,15 +489,74 @@ private:
     }
     
     std::vector<BootstrapResult> perform_bootstrap_asymptotic(
-            const MatrixXd& X_med, const MatrixXd& X_out, const VectorXd& beta_med,
-            const VectorXd& beta_out, const VectorXd& mediator,
-            const VectorXd& outcome, uint64_t global_combination_idx) {
+            const GlmFit& fit_m,
+            const GlmFit& fit_y,
+            GlmFamily fam_m,
+            GlmFamily fam_y,
+            int n,
+            uint64_t global_combination_idx,
+            const VectorXd& exposure_obs,
+            const VectorXd& outcome_obs,
+            bool replace_outcome_) {
         std::vector<BootstrapResult> results;
         results.reserve(nrep);
+
+        MatrixXd Lm = cholesky_lower_or_throw(fit_m.vcov, "mediator model vcov");
+        MatrixXd Ly = cholesky_lower_or_throw(fit_y.vcov, "outcome model vcov");
+
+        VectorXd M0(n), M1(n);
+        std::normal_distribution<double> stdnorm(0.0, 1.0);
+        const double sigma2_m = (fam_m == GlmFamily::Gaussian) ? fit_m.dispersion : 1.0;
+
+        for (int rep_idx = 0; rep_idx < nrep; ++rep_idx) {
+            std::mt19937_64 rng(
+                derive_seed(base_seed, global_combination_idx, rep_idx));
+
+            VectorXd zm(fit_m.coef.size());
+            VectorXd zy(fit_y.coef.size());
+            for (int i = 0; i < zm.size(); ++i) {
+                zm[i] = stdnorm(rng);
+            }
+            for (int i = 0; i < zy.size(); ++i) {
+                zy[i] = stdnorm(rng);
+            }
+
+            VectorXd bm = fit_m.coef + Lm * zm;
+            VectorXd by = fit_y.coef + Ly * zy;
+            results.push_back(simulate_effect_draw(
+                bm,
+                by,
+                fam_m,
+                fam_y,
+                sigma2_m,
+                rng,
+                exposure_obs,
+                outcome_obs,
+                replace_outcome_,
+                M0,
+                M1));
+        }
         
-        const auto n = X_med.rows();
-        const auto p_med = X_med.cols();
-        const auto p_out = X_out.cols();
+        return results;
+    }
+    
+    std::vector<BootstrapResult> perform_bootstrap_resample(
+            const VectorXd& exposure, const VectorXd& mediator,
+            const VectorXd& outcome,
+            GlmFamily fam_m,
+            GlmFamily fam_y,
+            int n,
+            uint64_t global_combination_idx,
+            bool replace_outcome_) {
+        std::vector<BootstrapResult> results;
+        results.reserve(nrep);
+
+        const int MAX_ATTEMPTS = 3 * nrep;
+        int rep_idx = 0;
+        int total_attempts = 0;
+        std::string last_exception_msg;
+        const int p_med = 2;
+        const int p_out = 3;
         if (n <= p_med) {
             throw std::runtime_error(
                 "Insufficient observations for mediator model: n must be > p_med");
@@ -356,90 +565,21 @@ private:
             throw std::runtime_error(
                 "Insufficient observations for outcome model: n must be > p_out");
         }
-        
-        VectorXd resid_med = mediator - X_med * beta_med;
-        double sigma_med =
-            std::sqrt(resid_med.squaredNorm() / static_cast<double>(n - p_med));
-        
-        VectorXd resid_out = outcome - X_out * beta_out;
-        double sigma_out =
-            std::sqrt(resid_out.squaredNorm() / static_cast<double>(n - p_out));
-        
-        MatrixXd XTX_med = X_med.transpose() * X_med;
-        MatrixXd XTX_out = X_out.transpose() * X_out;
-        
-        MatrixXd L_XTX_med =
-            cholesky_lower_or_throw(XTX_med, "mediator model design matrix");
-        MatrixXd L_XTX_out =
-            cholesky_lower_or_throw(XTX_out, "outcome model design matrix");
-        
-        MatrixXd L_med =
-            sigma_med * L_XTX_med.triangularView<Lower>().solve(
-                            MatrixXd::Identity(p_med, p_med));
-        MatrixXd L_out =
-            sigma_out * L_XTX_out.triangularView<Lower>().solve(
-                            MatrixXd::Identity(p_out, p_out));
-        
-        for (int rep_idx = 0; rep_idx < nrep; ++rep_idx) {
-            std::mt19937_64 gen(
-                derive_seed(base_seed, global_combination_idx, rep_idx));
-            std::normal_distribution<double> dist(0.0, 1.0);
-
-            VectorXd beta_med_boot =
-                beta_med + L_med *
-                VectorXd::NullaryExpr(beta_med.size(), [&]() {
-                    return dist(gen);
-                });
-            VectorXd beta_out_boot =
-                beta_out + L_out *
-                VectorXd::NullaryExpr(beta_out.size(), [&]() {
-                    return dist(gen);
-                });
-            
-            double m0 = beta_med_boot[0] + beta_med_boot[1] * X0;
-            double m1 = beta_med_boot[0] + beta_med_boot[1] * X1;
-            
-            double y00 = beta_out_boot[0] + beta_out_boot[1] * m0 +
-                beta_out_boot[2] * X0;
-            double y10 = beta_out_boot[0] + beta_out_boot[1] * m1 +
-                beta_out_boot[2] * X0;
-            double y01 = beta_out_boot[0] + beta_out_boot[1] * m0 +
-                beta_out_boot[2] * X1;
-            double y11 = beta_out_boot[0] + beta_out_boot[1] * m1 +
-                beta_out_boot[2] * X1;
-            
-            results.push_back({
-                y10 - y00,  // indirect_effect_0
-                y11 - y01,  // indirect_effect_1
-                y01 - y00,  // direct_effect_0
-                y11 - y10,  // direct_effect_1
-                y11 - y00   // total_effect
-            });
-        }
-        
-        return results;
-    }
-    
-    std::vector<BootstrapResult> perform_bootstrap_resample(
-            const VectorXd& exposure, const VectorXd& mediator,
-            const VectorXd& outcome, uint64_t global_combination_idx) {
-        std::vector<BootstrapResult> results;
-        results.reserve(nrep);
-        
-        const int n = static_cast<int>(exposure.size());
-        const int MAX_ATTEMPTS = 3 * nrep;
-        int rep_idx = 0;
-        int total_attempts = 0;
-        std::string last_exception_msg;
-
-        if (n <= 0) {
-            throw std::runtime_error("Data contains zero rows");
-        }
-
-        auto X_med_boot = std::make_unique<MatrixXd>(n, 2);
-        auto X_out_boot = std::make_unique<MatrixXd>(n, 3);
 
         std::uniform_int_distribution<int> dis(0, n - 1);
+
+        VectorXd prior_w = VectorXd::Ones(n);
+        VectorXd off_m = VectorXd::Zero(n);
+        VectorXd off_y = VectorXd::Zero(n);
+
+        VectorXd boot_exposure(n);
+        VectorXd boot_mediator(n);
+        VectorXd boot_outcome(n);
+
+        MatrixXd X_med_boot(n, 2);
+        MatrixXd X_out_boot(n, 3);
+
+        VectorXd M0(n), M1(n);
 
         while (rep_idx < nrep) {
             if (total_attempts >= MAX_ATTEMPTS) {
@@ -451,7 +591,7 @@ private:
                 throw std::runtime_error(oss.str());
             }
 
-            std::mt19937_64 gen(
+            std::mt19937_64 rng(
                 derive_seed(base_seed, global_combination_idx, rep_idx));
 
             bool success = false;
@@ -466,58 +606,133 @@ private:
                 }
                 ++total_attempts;
 
-            VectorXd boot_exposure(n);
-            VectorXd boot_mediator(n);
-            VectorXd boot_outcome(n);
-            
-            for (int m = 0; m < n; ++m) {
-                int sample_idx = dis(gen);
-                boot_exposure[m] = exposure[sample_idx];
-                boot_mediator[m] = mediator[sample_idx];
-                boot_outcome[m] = outcome[sample_idx];
+                for (int m = 0; m < n; ++m) {
+                    int sample_idx = dis(rng);
+                    boot_exposure[m] = exposure[sample_idx];
+                    boot_mediator[m] = mediator[sample_idx];
+                    boot_outcome[m] = outcome[sample_idx];
+                }
+
+                X_med_boot.col(0).setOnes();
+                X_med_boot.col(1) = boot_exposure;
+
+                X_out_boot.col(0).setOnes();
+                X_out_boot.col(1) = boot_mediator;
+                X_out_boot.col(2) = boot_exposure;
+
+                const int glm_maxit = 25;
+                const double glm_epsilon = 1e-8;
+                const double glm_qr_tol = 1e-12;
+
+                try {
+                    GlmFit fit_m_boot = glm_fit_irls_qr(X_med_boot,
+                                                       boot_mediator,
+                                                       fam_m,
+                                                       prior_w,
+                                                       off_m,
+                                                       glm_maxit,
+                                                       glm_epsilon,
+                                                       glm_qr_tol);
+                    GlmFit fit_y_boot = glm_fit_irls_qr(X_out_boot,
+                                                       boot_outcome,
+                                                       fam_y,
+                                                       prior_w,
+                                                       off_y,
+                                                       glm_maxit,
+                                                       glm_epsilon,
+                                                       glm_qr_tol);
+
+                    const double sigma2_m =
+                        (fam_m == GlmFamily::Gaussian) ? fit_m_boot.dispersion : 1.0;
+
+                    results.push_back(simulate_effect_draw(fit_m_boot.coef,
+                                                          fit_y_boot.coef,
+                                                          fam_m,
+                                                          fam_y,
+                                                          sigma2_m,
+                                                          rng,
+                                                          boot_exposure,
+                                                          boot_outcome,
+                                                          replace_outcome_,
+                                                          M0,
+                                                          M1));
+                    success = true;
+                    ++rep_idx;
+                } catch (const std::exception& e) {
+                    last_exception_msg = e.what();
+                }
             }
-            
-            X_med_boot->col(0).setOnes();
-            X_med_boot->col(1) = boot_exposure;
-            
-            X_out_boot->col(0).setOnes();
-            X_out_boot->col(1) = boot_mediator;
-            X_out_boot->col(2) = boot_exposure;
-            
-            try {
-                VectorXd beta_med_boot =
-                    linear_regression(*X_med_boot, boot_mediator);
-                VectorXd beta_out_boot =
-                    linear_regression(*X_out_boot, boot_outcome);
-                
-                double m0 = beta_med_boot[0] + beta_med_boot[1] * X0;
-                double m1 = beta_med_boot[0] + beta_med_boot[1] * X1;
-                
-                double y00 = beta_out_boot[0] + beta_out_boot[1] * m0 +
-                    beta_out_boot[2] * X0;
-                double y10 = beta_out_boot[0] + beta_out_boot[1] * m1 +
-                    beta_out_boot[2] * X0;
-                double y01 = beta_out_boot[0] + beta_out_boot[1] * m0 +
-                    beta_out_boot[2] * X1;
-                double y11 = beta_out_boot[0] + beta_out_boot[1] * m1 +
-                    beta_out_boot[2] * X1;
-                
-                results.push_back({
-                    y10 - y00,  // indirect_effect_0
-                    y11 - y01,  // indirect_effect_1
-                    y01 - y00,  // direct_effect_0
-                    y11 - y10,  // direct_effect_1
-                    y11 - y00   // total_effect
-                });
-                success = true;
-                ++rep_idx;
-            } catch (const std::exception& e) {
-                last_exception_msg = e.what();
-            }
-        }
         }
         
         return results;
+    }
+
+    BootstrapResult simulate_effect_draw(const VectorXd& bm,
+                                        const VectorXd& by,
+                                        GlmFamily fam_m,
+                                        GlmFamily fam_y,
+                                        double sigma2_m,
+                                        std::mt19937_64& rng,
+                                        const VectorXd& exposure_obs,
+                                        const VectorXd& outcome_obs,
+                                        bool replace_outcome_,
+                                        VectorXd& M0,
+                                        VectorXd& M1) {
+        const int n = static_cast<int>(M0.size());
+        if (M1.size() != n) {
+            throw std::runtime_error("simulate_effect_draw: size mismatch");
+        }
+        if (exposure_obs.size() != n || outcome_obs.size() != n) {
+            throw std::runtime_error("simulate_effect_draw: observed size mismatch");
+        }
+
+        double eta_m0 = bm[0] + bm[1] * X0;
+        double eta_m1 = bm[0] + bm[1] * X1;
+        simulate_mediator_draw(fam_m, eta_m0, eta_m1, sigma2_m, rng, M0, M1);
+
+        double sum_y00 = 0.0;
+        double sum_y01 = 0.0;
+        double sum_y10 = 0.0;
+        double sum_y11 = 0.0;
+
+        for (int i = 0; i < n; ++i) {
+            double eta00 = by[0] + by[1] * M0[i] + by[2] * X0;
+            double eta01 = by[0] + by[1] * M1[i] + by[2] * X0;
+            double eta10 = by[0] + by[1] * M0[i] + by[2] * X1;
+            double eta11 = by[0] + by[1] * M1[i] + by[2] * X1;
+
+            double y00 = linkinv(eta00, fam_y);
+            double y01 = linkinv(eta01, fam_y);
+            double y10 = linkinv(eta10, fam_y);
+            double y11 = linkinv(eta11, fam_y);
+
+            if (replace_outcome_) {
+                if (exposure_obs[i] == X0) {
+                    y00 = outcome_obs[i];
+                }
+                if (exposure_obs[i] == X1) {
+                    y11 = outcome_obs[i];
+                }
+            }
+
+            sum_y00 += y00;
+            sum_y01 += y01;
+            sum_y10 += y10;
+            sum_y11 += y11;
+        }
+
+        double mean_y00 = sum_y00 / static_cast<double>(n);
+        double mean_y01 = sum_y01 / static_cast<double>(n);
+        double mean_y10 = sum_y10 / static_cast<double>(n);
+        double mean_y11 = sum_y11 / static_cast<double>(n);
+
+        double d0 = mean_y01 - mean_y00;  // ACME(control)
+        double d1 = mean_y11 - mean_y10;  // ACME(treated)
+        double z0 = mean_y10 - mean_y00;  // ADE(control)
+        double z1 = mean_y11 - mean_y01;  // ADE(treated)
+        double tau = mean_y11 - mean_y00; // total
+
+        return {d0, d1, z0, z1, tau};
     }
     
     std::string format_results(const std::string& exposure_col,
@@ -569,7 +784,10 @@ void mediation_analysis_cpp(NumericMatrix data, CharacterVector column_names,
                             std::string output_file,
                             std::string pert = "asymptotic",
                             uint64_t base_seed = 0,
-                            bool append = false) {
+                            bool append = false,
+                            std::string mediator_family = "auto",
+                            std::string outcome_family = "auto",
+                            bool replace_outcome = false) {
     try {
         if (data.nrow() == 0 || data.ncol() == 0) {
             throw std::invalid_argument("Data matrix is empty");
@@ -680,8 +898,9 @@ void mediation_analysis_cpp(NumericMatrix data, CharacterVector column_names,
             MediationWorker worker(data_eigen, column_index_map, nrep,
                                    exposure_vec_cpp, mediator_vec_cpp,
                                    outcome_vec_cpp, global_indices, pert,
-                                   base_seed, chunk_begin, chunk_results,
-                                   &error, &error_mutex);
+                                   mediator_family, outcome_family,
+                                   replace_outcome, base_seed, chunk_begin,
+                                   chunk_results, &error, &error_mutex);
 
             RcppParallel::parallelFor(chunk_begin, chunk_end, worker);
 

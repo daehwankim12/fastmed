@@ -12,7 +12,10 @@ mediation_analysis(
   num_threads = parallel::detectCores(),
   pert = "asymptotic",
   seed = NULL,
-  chunk_size = 10000
+  chunk_size = 10000,
+  mediator.family = "auto",
+  outcome.family = "auto",
+  replace.outcome = FALSE
 )
 }
 \arguments{
@@ -20,7 +23,9 @@ mediation_analysis(
 
 \item{columns}{A list with three named elements: `exposure`, `mediator`, and `outcome`. Each element should be a character vector containing the prefixes of the column names for the corresponding variables. For example, if your exposure variables are named "Exposure_1", "Exposure_2", etc., the `exposure` element should be `"Exposure"`.}
 
-\item{nrep}{An integer specifying the number of bootstrap replicates to perform.  Higher values generally lead to more stable estimates but increase computation time. Default is 1000.}
+\item{nrep}{An integer specifying the number of simulation draws (asymptotic)
+or bootstrap replicates (bootstrap). Higher values generally lead to more
+stable estimates but increase computation time. Default is 1000.}
 
 \item{output_file}{A character string specifying the path to the output CSV file.  Results are written to this file in real-time.  The file will be overwritten if it already exists.}
 
@@ -37,15 +42,25 @@ environment.}
 \item{chunk_size}{Maximum number of (exposure, mediator, outcome) combinations
 to process per call into the C++ backend. For large analyses, smaller
 values reduce peak memory usage. Default is 10000.}
+
+\item{mediator.family}{Model family for the mediator regression. One of
+`"auto"`, `"gaussian"`, `"binomial"`, `"poisson"`. Default is `"auto"`.}
+
+\item{outcome.family}{Model family for the outcome regression. One of
+`"auto"`, `"gaussian"`, `"binomial"`, `"poisson"`. Default is `"auto"`.}
+
+\item{replace.outcome}{Logical; if TRUE, replace the simulated `Y(0,M(0))`
+for observed controls and `Y(1,M(1))` for observed treated units with the
+observed outcome. Default is FALSE.}
 }
 \value{
 None.  The results are written to the specified `output_file` in CSV format.
 }
 \description{
-This function performs mediation analysis using multiple linear regressions
-and either an asymptotic (normal) perturbation or bootstrap resampling to
-estimate direct, indirect, and total effects. Results are written to a CSV
-file.
+This function performs mediation analysis using generalized linear models
+(Gaussian/Binomial/Poisson) and either an asymptotic (quasi-Bayesian)
+perturbation or bootstrap resampling to estimate direct, indirect, and total
+effects. Results are written to a CSV file.
 }
 \details{
 This function estimates the following effects:
@@ -55,6 +70,14 @@ This function estimates the following effects:
 
 The output CSV file includes mean estimates, 95% percentile confidence
 intervals, and p-values for each effect and combination of variables.
+
+Family auto-detection is based on the response values:
+* All values in `{0,1}` -> Binomial
+* All values are non-negative integers -> Poisson
+* Otherwise -> Gaussian
+
+Setting `replace.outcome = TRUE` replaces some simulated outcomes with
+observed outcomes and may reduce agreement with `mediation::mediate()`.
 }
 \examples{
 \dontrun{
