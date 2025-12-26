@@ -83,7 +83,16 @@ print(results)
 
 ### Output
 
-The output CSV file will contain detailed results for each combination of exposure, mediator, and outcome variables, including estimates, standard errors, confidence intervals, and p-values for indirect, direct, and total effects.
+The output CSV file will contain detailed results for each combination of exposure, mediator, and outcome variables, including mean estimates, 95% percentile confidence intervals, and p-values for indirect, direct, and total effects.
+
+### p-value definition
+
+`fastmed` reports a two-sided, sign-based p-value for the null hypothesis H₀: effect = 0 from the replicate effect samples:
+
+- Let `pos = #{v > 0}`, `neg = #{v < 0}`, `zero = n - pos - neg`
+- Split zeros evenly: `pos_eff = pos + 0.5 * zero`
+- Continuity correction: `prop = (pos_eff + 1) / (n + 2)`
+- Two-sided p-value: `p = 2 * min(prop, 1 - prop)`
 
 ## Performance Considerations
 

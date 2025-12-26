@@ -67,20 +67,45 @@ double percentile_cpp(const std::vector<double>& data, double perc) {
     return sorted_data[k];
 }
 
-double p_value_cpp(const std::vector<double>& data, double estimate) {
-    if (data.empty()) {
-        return std::numeric_limits<double>::quiet_NaN();
+double p_value_cpp(const std::vector<double>& samples) {
+    size_t n = samples.size();
+    if (n == 0) {
+        return 1.0;
     }
-    double count = static_cast<double>(std::count_if(
-        data.begin(), data.end(),
-        [estimate](double v) { return std::abs(v) >= std::abs(estimate); }));
-    return count / data.size();
+
+    size_t pos = 0;
+    size_t neg = 0;
+    for (double v : samples) {
+        if (v > 0) {
+            ++pos;
+        } else if (v < 0) {
+            ++neg;
+        }
+    }
+    size_t zero = n - pos - neg;
+
+    double pos_eff = static_cast<double>(pos) + 0.5 * static_cast<double>(zero);
+    double prop = (pos_eff + 1.0) / (static_cast<double>(n) + 2.0);
+    return 2.0 * std::min(prop, 1.0 - prop);
+}
+
+MatrixXd cholesky_lower_or_throw(MatrixXd cov, const std::string& context) {
+    cov = 0.5 * (cov + cov.transpose());
+    Eigen::LLT<MatrixXd> chol(cov);
+    if (chol.info() != Eigen::Success) {
+        throw std::runtime_error("Cholesky decomposition failed for " + context);
+    }
+    MatrixXd L = chol.matrixL();
+    if (!L.allFinite() || (L.diagonal().array() <= 0.0).any()) {
+        throw std::runtime_error("Cholesky decomposition failed for " + context);
+    }
+    return L;
 }
 
 StatisticsSummary calculate_statistics(const std::vector<double>& samples) {
     return {mean_cpp(samples), percentile_cpp(samples, PERCENTILE_2_5),
             percentile_cpp(samples, PERCENTILE_97_5),
-            p_value_cpp(samples, 0.0)};
+            p_value_cpp(samples)};
 }
 
 Eigen::VectorXd linear_regression(const Eigen::MatrixXd& X,
@@ -258,51 +283,66 @@ private:
         std::vector<BootstrapResult> results;
         results.reserve(nrep);
         
+        const auto n = X_med.rows();
+        const auto p_med = X_med.cols();
+        const auto p_out = X_out.cols();
+        if (n <= p_med) {
+            throw std::runtime_error(
+                "Insufficient observations for mediator model: n must be > p_med");
+        }
+        if (n <= p_out) {
+            throw std::runtime_error(
+                "Insufficient observations for outcome model: n must be > p_out");
+        }
+        
         VectorXd resid_med = mediator - X_med * beta_med;
-        double sigma_med = std_dev_cpp(std::vector<double>(
-            resid_med.data(), resid_med.data() + resid_med.size()));
+        double sigma_med =
+            std::sqrt(resid_med.squaredNorm() / static_cast<double>(n - p_med));
         
         VectorXd resid_out = outcome - X_out * beta_out;
-        double sigma_out = std_dev_cpp(std::vector<double>(
-            resid_out.data(), resid_out.data() + resid_out.size()));
+        double sigma_out =
+            std::sqrt(resid_out.squaredNorm() / static_cast<double>(n - p_out));
         
-        MatrixXd cov_beta_med =
-            sigma_med * sigma_med * (X_med.transpose() * X_med).inverse();
-        MatrixXd cov_beta_out =
-            sigma_out * sigma_out * (X_out.transpose() * X_out).inverse();
+        MatrixXd XTX_med = X_med.transpose() * X_med;
+        MatrixXd XTX_out = X_out.transpose() * X_out;
         
-        Eigen::LLT<MatrixXd> chol_med(cov_beta_med);
-        Eigen::LLT<MatrixXd> chol_out(cov_beta_out);
+        MatrixXd L_XTX_med =
+            cholesky_lower_or_throw(XTX_med, "mediator model design matrix");
+        MatrixXd L_XTX_out =
+            cholesky_lower_or_throw(XTX_out, "outcome model design matrix");
+        
+        MatrixXd L_med =
+            sigma_med * L_XTX_med.triangularView<Lower>().solve(
+                            MatrixXd::Identity(p_med, p_med));
+        MatrixXd L_out =
+            sigma_out * L_XTX_out.triangularView<Lower>().solve(
+                            MatrixXd::Identity(p_out, p_out));
         
         std::normal_distribution<> dist(0.0, 1.0);
-        std::normal_distribution<> dist_med_error(0.0, sigma_med);
-        std::normal_distribution<> dist_out_error(0.0, sigma_out);
         
         for (int rep = 0; rep < nrep; ++rep) {
             VectorXd beta_med_boot =
-                beta_med + chol_med.matrixL() *
+                beta_med + L_med *
                 VectorXd::NullaryExpr(beta_med.size(), [&]() {
                     return dist(gen);
                 });
             VectorXd beta_out_boot =
-                beta_out + chol_out.matrixL() *
+                beta_out + L_out *
                 VectorXd::NullaryExpr(beta_out.size(), [&]() {
                     return dist(gen);
                 });
             
-            double m0 =
-                beta_med_boot[0] + beta_med_boot[1] * X0 + dist_med_error(gen);
-            double m1 =
-                beta_med_boot[0] + beta_med_boot[1] * X1 + dist_med_error(gen);
+            double m0 = beta_med_boot[0] + beta_med_boot[1] * X0;
+            double m1 = beta_med_boot[0] + beta_med_boot[1] * X1;
             
             double y00 = beta_out_boot[0] + beta_out_boot[1] * m0 +
-                beta_out_boot[2] * X0 + dist_out_error(gen);
+                beta_out_boot[2] * X0;
             double y10 = beta_out_boot[0] + beta_out_boot[1] * m1 +
-                beta_out_boot[2] * X0 + dist_out_error(gen);
+                beta_out_boot[2] * X0;
             double y01 = beta_out_boot[0] + beta_out_boot[1] * m0 +
-                beta_out_boot[2] * X1 + dist_out_error(gen);
+                beta_out_boot[2] * X1;
             double y11 = beta_out_boot[0] + beta_out_boot[1] * m1 +
-                beta_out_boot[2] * X1 + dist_out_error(gen);
+                beta_out_boot[2] * X1;
             
             results.push_back({
                 y10 - y00,  // indirect_effect_0
