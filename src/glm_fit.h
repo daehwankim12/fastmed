@@ -30,3 +30,12 @@ GlmFit glm_fit_irls_qr(const MatrixXd& X,
                        double epsilon,
                        double qr_tol);
 
+GlmFit glm_fit_irls_qr(const MatrixXd& X,
+                       const VectorXd& y,
+                       GlmFamily fam,
+                       const VectorXd& prior_w,
+                       const VectorXd& offset,
+                       int maxit,
+                       double epsilon,
+                       double qr_tol,
+                       bool fast_solver);

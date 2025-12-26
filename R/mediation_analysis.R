@@ -21,6 +21,9 @@
 #' @param chunk_size Maximum number of (exposure, mediator, outcome) combinations
 #'   to buffer per chunk inside the C++ backend. Smaller values reduce peak
 #'   memory usage for very large analyses. Default is 10000.
+#' @param grain_size Number of (exposure, mediator, outcome) combinations to
+#'   process per parallel task inside the C++ backend. Larger values reduce
+#'   scheduling overhead when individual combinations are cheap. Default is 100.
 #' @param mediator.family Model family for the mediator regression. One of
 #'   `"auto"`, `"gaussian"`, `"binomial"`, `"poisson"`. Default is `"auto"`.
 #' @param outcome.family Model family for the outcome regression. One of
@@ -86,6 +89,7 @@ mediation_analysis <- function(data,
                                pert = "asymptotic",
                                seed = NULL,
                                chunk_size = 10000,
+                               grain_size = 100,
                                mediator.family = "auto",
                                outcome.family = "auto",
                                replace.outcome = FALSE,
@@ -112,6 +116,11 @@ mediation_analysis <- function(data,
     stop("chunk_size must be a positive integer.")
   }
   chunk_size <- as.integer(chunk_size)
+
+  if (!is.numeric(grain_size) || length(grain_size) != 1 || is.na(grain_size) || grain_size <= 0) {
+    stop("grain_size must be a positive integer.")
+  }
+  grain_size <- as.integer(grain_size)
 
   valid_families <- c("gaussian", "binomial", "poisson", "auto")
   if (!is.character(mediator.family) || length(mediator.family) != 1L || is.na(mediator.family)) {
@@ -242,7 +251,8 @@ mediation_analysis <- function(data,
     outcome_family = outcome.family,
     replace_outcome = isTRUE(replace.outcome),
     output_format = output.format,
-    chunk_size = chunk_size
+    chunk_size = chunk_size,
+    grain_size = grain_size
   )
 
   cat("Mediation analysis completed. Results saved to", output_file, "\n")

@@ -219,12 +219,17 @@ static inline VectorXd wls_solve_qr(const MatrixXd& X,
                                     const VectorXd& sqrt_w,
                                     double qr_tol,
                                     int* out_rank = nullptr) {
-    if (X.rows() != z.size() || z.size() != sqrt_w.size()) {
+    MatrixXd Xw(X.rows(), X.cols());
+    VectorXd zw(z.size());
+    if (z.size() != X.rows()) {
+        throw std::runtime_error("wls_solve_qr: dimension mismatch");
+    }
+    if (sqrt_w.size() != X.rows()) {
         throw std::runtime_error("wls_solve_qr: dimension mismatch");
     }
 
-    MatrixXd Xw = X.array().colwise() * sqrt_w.array();
-    VectorXd zw = z.array() * sqrt_w.array();
+    Xw = X.array().colwise() * sqrt_w.array();
+    zw = z.array() * sqrt_w.array();
 
     Eigen::ColPivHouseholderQR<MatrixXd> qr(Xw);
     qr.setThreshold(qr_tol);
@@ -234,6 +239,103 @@ static inline VectorXd wls_solve_qr(const MatrixXd& X,
     return qr.solve(zw);
 }
 
+static inline VectorXd wls_solve_qr_inplace(const MatrixXd& X,
+                                            const VectorXd& z,
+                                            const VectorXd& sqrt_w,
+                                            double qr_tol,
+                                            MatrixXd& Xw,
+                                            VectorXd& zw,
+                                            int* out_rank = nullptr) {
+    if (X.rows() != z.size() || z.size() != sqrt_w.size()) {
+        throw std::runtime_error("wls_solve_qr: dimension mismatch");
+    }
+    if (Xw.rows() != X.rows() || Xw.cols() != X.cols()) {
+        throw std::runtime_error("wls_solve_qr_inplace: Xw dimension mismatch");
+    }
+    if (zw.size() != z.size()) {
+        throw std::runtime_error("wls_solve_qr_inplace: zw dimension mismatch");
+    }
+
+    Xw = X.array().colwise() * sqrt_w.array();
+    zw = z.array() * sqrt_w.array();
+
+    Eigen::ColPivHouseholderQR<MatrixXd> qr(Xw);
+    qr.setThreshold(qr_tol);
+    if (out_rank) {
+        *out_rank = qr.rank();
+    }
+    return qr.solve(zw);
+}
+
+static inline bool wls_solve_ldlt_smallp(const MatrixXd& X,
+                                        const VectorXd& z,
+                                        const VectorXd& sqrt_w,
+                                        double tol,
+                                        VectorXd& beta_out,
+                                        int* out_rank = nullptr) {
+    const int n = static_cast<int>(X.rows());
+    const int p = static_cast<int>(X.cols());
+    if (p <= 0 || p > 3) {
+        throw std::runtime_error("wls_solve_ldlt_smallp: only supports p in {1,2,3}");
+    }
+    if (z.size() != n || sqrt_w.size() != n) {
+        throw std::runtime_error("wls_solve_ldlt_smallp: dimension mismatch");
+    }
+    if (beta_out.size() != p) {
+        beta_out.resize(p);
+    }
+
+    MatrixXd XtWX = MatrixXd::Zero(p, p);
+    VectorXd XtWz = VectorXd::Zero(p);
+
+    for (int i = 0; i < n; ++i) {
+        const double sw = sqrt_w[i];
+        if (!(sw > 0.0) || !std::isfinite(sw) || !std::isfinite(z[i])) {
+            continue;
+        }
+        const double w = sw * sw;
+        for (int j = 0; j < p; ++j) {
+            const double xij = X(i, j);
+            XtWz[j] += w * xij * z[i];
+            for (int k = j; k < p; ++k) {
+                XtWX(j, k) += w * xij * X(i, k);
+            }
+        }
+    }
+
+    for (int j = 0; j < p; ++j) {
+        for (int k = j + 1; k < p; ++k) {
+            XtWX(k, j) = XtWX(j, k);
+        }
+    }
+
+    Eigen::LDLT<MatrixXd> ldlt(XtWX);
+    if (ldlt.info() != Eigen::Success) {
+        return false;
+    }
+
+    const VectorXd D = ldlt.vectorD();
+    int rank = 0;
+    for (int j = 0; j < p; ++j) {
+        if (std::fabs(D[j]) > tol) {
+            ++rank;
+        }
+    }
+    if (out_rank) {
+        *out_rank = rank;
+    }
+    if (rank < p) {
+        return false;
+    }
+
+    beta_out = ldlt.solve(XtWz);
+    if (!beta_out.allFinite()) {
+        return false;
+    }
+
+    return true;
+}
+
 GlmFit glm_fit_irls_qr(const MatrixXd& X,
                        const VectorXd& y,
                        GlmFamily fam,
@@ -241,7 +343,8 @@ GlmFit glm_fit_irls_qr(const MatrixXd& X,
                        const VectorXd& offset,
                        int maxit,
                        double epsilon,
-                       double qr_tol) {
+                       double qr_tol,
+                       bool fast_solver) {
     const int n = static_cast<int>(X.rows());
     const int p = static_cast<int>(X.cols());
     if (y.size() != n) {
@@ -279,31 +382,49 @@ GlmFit glm_fit_irls_qr(const MatrixXd& X,
         mu[i] = linkinv(eta[i], fam);
     }
 
+    VectorXd z(n);
+    VectorXd w_sqrt(n);
+    VectorXd mu_eta_v(n);
+    VectorXd var_v(n);
+
+    MatrixXd Xw(n, p);
+    VectorXd zw(n);
+
     VectorXd beta(p);
     {
-        std::vector<int> good;
-        good.reserve(n);
+        int good_count = 0;
         for (int i = 0; i < n; ++i) {
-            if (prior_w[i] > 0 && std::isfinite(eta[i]) && std::isfinite(offset[i])) {
-                good.push_back(i);
+            if (!(prior_w[i] > 0) || !std::isfinite(eta[i]) || !std::isfinite(offset[i])) {
+                z[i] = 0.0;
+                w_sqrt[i] = 0.0;
+                continue;
+            }
+
+            const double zi = eta[i] - offset[i];
+            const double wi = std::sqrt(prior_w[i]);
+
+            if (std::isfinite(zi) && std::isfinite(wi) && wi > 0.0) {
+                z[i] = zi;
+                w_sqrt[i] = wi;
+                ++good_count;
+            } else {
+                z[i] = 0.0;
+                w_sqrt[i] = 0.0;
             }
         }
-        if (static_cast<int>(good.size()) <= p) {
+        if (good_count <= p) {
             throw std::runtime_error("glm_fit_irls_qr: insufficient good rows at init");
         }
 
-        MatrixXd Xg(static_cast<int>(good.size()), p);
-        VectorXd zg(static_cast<int>(good.size()));
-        VectorXd sw(static_cast<int>(good.size()));
-        for (int r = 0; r < static_cast<int>(good.size()); ++r) {
-            int i = good[r];
-            Xg.row(r) = X.row(i);
-            zg[r] = eta[i] - offset[i];
-            sw[r] = std::sqrt(prior_w[i]);
-        }
-
         int rank = 0;
-        beta = wls_solve_qr(Xg, zg, sw, qr_tol, &rank);
+        const double ldlt_tol = std::max(1e-12, qr_tol);
+        if (fast_solver && p <= 3) {
+            if (!wls_solve_ldlt_smallp(X, z, w_sqrt, ldlt_tol, beta, &rank)) {
+                beta = wls_solve_qr_inplace(X, z, w_sqrt, qr_tol, Xw, zw, &rank);
+            }
+        } else {
+            beta = wls_solve_qr_inplace(X, z, w_sqrt, qr_tol, Xw, zw, &rank);
+        }
         if (rank < p) {
             throw std::runtime_error("glm_fit_irls_qr: rank deficient at init");
         }
@@ -314,11 +435,6 @@ GlmFit glm_fit_irls_qr(const MatrixXd& X,
     bool converged = false;
     int it = 0;
     int rank = p;
-
-    VectorXd z(n);
-    VectorXd w_sqrt(n);
-    VectorXd mu_eta_v(n);
-    VectorXd var_v(n);
 
     for (it = 0; it < maxit; ++it) {
         eta = X * beta + offset;
@@ -335,45 +451,51 @@ GlmFit glm_fit_irls_qr(const MatrixXd& X,
             var_v[i] = variance_mu(mui, fam);
         }
 
-        std::vector<int> good;
-        good.reserve(n);
+        int good_count = 0;
         for (int i = 0; i < n; ++i) {
             if (!(prior_w[i] > 0)) {
+                z[i] = 0.0;
+                w_sqrt[i] = 0.0;
                 continue;
             }
             if (!std::isfinite(eta[i]) || !std::isfinite(mu[i])) {
+                z[i] = 0.0;
+                w_sqrt[i] = 0.0;
                 continue;
             }
 
             double d = std::max(mu_eta_v[i], 1e-12);
             double v = std::max(var_v[i], 1e-12);
 
-            z[i] = (eta[i] - offset[i]) + (y[i] - mu[i]) / d;
-            w_sqrt[i] = std::sqrt(prior_w[i] * (d * d) / v);
+            const double zi = (eta[i] - offset[i]) + (y[i] - mu[i]) / d;
+            const double wi = std::sqrt(prior_w[i] * (d * d) / v);
 
-            if (std::isfinite(z[i]) && std::isfinite(w_sqrt[i]) && w_sqrt[i] > 0) {
-                good.push_back(i);
+            if (std::isfinite(zi) && std::isfinite(wi) && wi > 0) {
+                z[i] = zi;
+                w_sqrt[i] = wi;
+                ++good_count;
+            } else {
+                z[i] = 0.0;
+                w_sqrt[i] = 0.0;
             }
         }
 
-        if (static_cast<int>(good.size()) <= p) {
+        if (good_count <= p) {
             throw std::runtime_error("glm_fit_irls_qr: insufficient good rows");
-        }
-
-        MatrixXd Xg(static_cast<int>(good.size()), p);
-        VectorXd zg(static_cast<int>(good.size()));
-        VectorXd sw(static_cast<int>(good.size()));
-        for (int r = 0; r < static_cast<int>(good.size()); ++r) {
-            int i = good[r];
-            Xg.row(r) = X.row(i);
-            zg[r] = z[i];
-            sw[r] = w_sqrt[i];
         }
 
         VectorXd beta_new;
         {
             int rrank = 0;
-            beta_new = wls_solve_qr(Xg, zg, sw, qr_tol, &rrank);
+            const double ldlt_tol = std::max(1e-12, qr_tol);
+            if (fast_solver && p <= 3) {
+                beta_new.resize(p);
+                if (!wls_solve_ldlt_smallp(X, z, w_sqrt, ldlt_tol, beta_new, &rrank)) {
+                    beta_new = wls_solve_qr_inplace(X, z, w_sqrt, qr_tol, Xw, zw, &rrank);
+                }
+            } else {
+                beta_new = wls_solve_qr_inplace(X, z, w_sqrt, qr_tol, Xw, zw, &rrank);
+            }
             rank = rrank;
             if (rank < p) {
                 throw std::runtime_error("glm_fit_irls_qr: rank deficient");
@@ -479,6 +601,25 @@ GlmFit glm_fit_irls_qr(const MatrixXd& X,
     return fit;
 }
 
+GlmFit glm_fit_irls_qr(const MatrixXd& X,
+                       const VectorXd& y,
+                       GlmFamily fam,
+                       const VectorXd& prior_w,
+                       const VectorXd& offset,
+                       int maxit,
+                       double epsilon,
+                       double qr_tol) {
+    return glm_fit_irls_qr(X,
+                           y,
+                           fam,
+                           prior_w,
+                           offset,
+                           maxit,
+                           epsilon,
+                           qr_tol,
+                           false);
+}
+
 // [[Rcpp::export]]
 Rcpp::List glm_fit_cpp(const Eigen::MatrixXd& X,
                        const Eigen::VectorXd& y,
@@ -527,4 +668,3 @@ Rcpp::List glm_fit_cpp(const Eigen::MatrixXd& X,
         Rcpp::Named("dev") = fit.dev,
         Rcpp::Named("rank") = fit.rank);
 }
-

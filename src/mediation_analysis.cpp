@@ -5,6 +5,7 @@
 #include "glm_fit.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cstdint>
 #include <cmath>
 #include <fstream>
@@ -129,46 +130,6 @@ static inline double linkinv(double eta, GlmFamily fam) {
     return safe_exp(eta);  // Poisson
 }
 
-static inline void simulate_mediator_draw(GlmFamily fam_m,
-                                         double eta0,
-                                         double eta1,
-                                         double sigma2_m,
-                                         std::mt19937_64& rng,
-                                         VectorXd& M0,
-                                         VectorXd& M1) {
-    const int n = static_cast<int>(M0.size());
-    if (M1.size() != n) {
-        throw std::runtime_error("simulate_mediator_draw: size mismatch");
-    }
-
-    if (fam_m == GlmFamily::Gaussian) {
-        double sd = std::sqrt(std::max(0.0, sigma2_m));
-        std::normal_distribution<double> nd(0.0, sd);
-        for (int i = 0; i < n; ++i) {
-            double e = nd(rng);  // SAME noise for both conditions
-            M0[i] = eta0 + e;
-            M1[i] = eta1 + e;
-        }
-    } else if (fam_m == GlmFamily::Binomial) {
-        double p0 = inv_logit(eta0);
-        double p1 = inv_logit(eta1);
-        std::uniform_real_distribution<double> unif(0.0, 1.0);
-        for (int i = 0; i < n; ++i) {
-            M0[i] = (unif(rng) < p0) ? 1.0 : 0.0;
-            M1[i] = (unif(rng) < p1) ? 1.0 : 0.0;
-        }
-    } else {  // Poisson
-        double lam0 = safe_exp(eta0);
-        double lam1 = safe_exp(eta1);
-        std::poisson_distribution<int> p0(lam0);
-        std::poisson_distribution<int> p1(lam1);
-        for (int i = 0; i < n; ++i) {
-            M0[i] = static_cast<double>(p0(rng));
-            M1[i] = static_cast<double>(p1(rng));
-        }
-    }
-}
-
 uint64_t derive_seed(uint64_t base_seed,
                      uint64_t global_combination_idx,
                      uint64_t rep_idx) {
@@ -201,6 +162,33 @@ std::string csv_escape(const std::string& field) {
     }
     escaped += "\"";
     return escaped;
+}
+
+static inline void append_csv_double_fixed6(std::string& out, double value) {
+    if (!std::isfinite(value)) {
+        out += "NA";
+        return;
+    }
+
+    char buf[64];
+    auto [ptr, ec] =
+        std::to_chars(buf, buf + sizeof(buf), value, std::chars_format::fixed, 6);
+    if (ec != std::errc()) {
+        out += "NA";
+        return;
+    }
+    out.append(buf, static_cast<size_t>(ptr - buf));
+}
+
+static inline void append_statistics(std::string& out,
+                                     const StatisticsSummary& stats) {
+    append_csv_double_fixed6(out, stats.mean);
+    out.push_back(',');
+    append_csv_double_fixed6(out, stats.percentile_2_5);
+    out.push_back(',');
+    append_csv_double_fixed6(out, stats.percentile_97_5);
+    out.push_back(',');
+    append_csv_double_fixed6(out, stats.p_value);
 }
 
 MatrixXd cholesky_lower_or_throw(MatrixXd cov, const std::string& context) {
@@ -351,15 +339,15 @@ private:
         std::string combination =
             exposure_col + "_" + mediator_col + "_" + outcome_col;
 
-        std::stringstream result_stream;
-        result_stream.imbue(std::locale::classic());
-        result_stream << csv_escape(combination);
+        std::string result;
+        result.reserve(combination.size() + 128);
+        result += csv_escape(combination);
         const int na_cols = legacy_output_schema ? 12 : 20;
         for (int i = 0; i < na_cols; ++i) {
-            result_stream << ",NA";
+            result += ",NA";
         }
-        result_stream << "\n";
-        return result_stream.str();
+        result.push_back('\n');
+        return result;
     }
 
     std::string process_combination(std::size_t idx) {
@@ -474,7 +462,6 @@ private:
         MatrixXd Lm = cholesky_lower_or_throw(fit_m.vcov, "mediator model vcov");
         MatrixXd Ly = cholesky_lower_or_throw(fit_y.vcov, "outcome model vcov");
 
-        VectorXd M0(n), M1(n);
         std::normal_distribution<double> stdnorm(0.0, 1.0);
         const double sigma2_m = (fam_m == GlmFamily::Gaussian) ? fit_m.dispersion : 1.0;
 
@@ -502,9 +489,7 @@ private:
                 rng,
                 exposure_obs,
                 outcome_obs,
-                replace_outcome_,
-                M0,
-                M1));
+                replace_outcome_));
         }
         
         return results;
@@ -548,8 +533,6 @@ private:
 
         MatrixXd X_med_boot(n, 2);
         MatrixXd X_out_boot(n, 3);
-
-        VectorXd M0(n), M1(n);
 
         while (rep_idx < nrep) {
             if (total_attempts >= MAX_ATTEMPTS) {
@@ -623,9 +606,7 @@ private:
                                                           rng,
                                                           boot_exposure,
                                                           boot_outcome,
-                                                          replace_outcome_,
-                                                          M0,
-                                                          M1));
+                                                          replace_outcome_));
                     success = true;
                     ++rep_idx;
                 } catch (const std::exception& e) {
@@ -645,62 +626,177 @@ private:
                                         std::mt19937_64& rng,
                                         const VectorXd& exposure_obs,
                                         const VectorXd& outcome_obs,
-                                        bool replace_outcome_,
-                                        VectorXd& M0,
-                                        VectorXd& M1) {
-        const int n = static_cast<int>(M0.size());
-        if (M1.size() != n) {
-            throw std::runtime_error("simulate_effect_draw: size mismatch");
-        }
-        if (exposure_obs.size() != n || outcome_obs.size() != n) {
+                                        bool replace_outcome_) {
+        const int n = static_cast<int>(exposure_obs.size());
+        if (outcome_obs.size() != n) {
             throw std::runtime_error("simulate_effect_draw: observed size mismatch");
         }
 
         double eta_m0 = bm[0] + bm[1] * X0;
         double eta_m1 = bm[0] + bm[1] * X1;
-        simulate_mediator_draw(fam_m, eta_m0, eta_m1, sigma2_m, rng, M0, M1);
+
+        if (fam_y == GlmFamily::Gaussian && !replace_outcome_) {
+            double sum_M0 = 0.0;
+            double sum_M1 = 0.0;
+
+            if (fam_m == GlmFamily::Gaussian) {
+                double sd = std::sqrt(std::max(0.0, sigma2_m));
+                std::normal_distribution<double> nd(0.0, sd);
+                for (int i = 0; i < n; ++i) {
+                    double e = nd(rng);
+                    sum_M0 += eta_m0 + e;
+                    sum_M1 += eta_m1 + e;
+                }
+            } else if (fam_m == GlmFamily::Binomial) {
+                double p0 = inv_logit(eta_m0);
+                double p1 = inv_logit(eta_m1);
+                std::uniform_real_distribution<double> unif(0.0, 1.0);
+                for (int i = 0; i < n; ++i) {
+                    sum_M0 += (unif(rng) < p0) ? 1.0 : 0.0;
+                    sum_M1 += (unif(rng) < p1) ? 1.0 : 0.0;
+                }
+            } else {  // Poisson
+                double lam0 = safe_exp(eta_m0);
+                double lam1 = safe_exp(eta_m1);
+                std::poisson_distribution<int> p0(lam0);
+                std::poisson_distribution<int> p1(lam1);
+                for (int i = 0; i < n; ++i) {
+                    sum_M0 += static_cast<double>(p0(rng));
+                    sum_M1 += static_cast<double>(p1(rng));
+                }
+            }
+
+            const double mean_M0 = sum_M0 / static_cast<double>(n);
+            const double mean_M1 = sum_M1 / static_cast<double>(n);
+
+            const double mean_y00 = by[0] + by[1] * mean_M0 + by[2] * X0;
+            const double mean_y01 = by[0] + by[1] * mean_M1 + by[2] * X0;
+            const double mean_y10 = by[0] + by[1] * mean_M0 + by[2] * X1;
+            const double mean_y11 = by[0] + by[1] * mean_M1 + by[2] * X1;
+
+            const double d0 = mean_y01 - mean_y00;  // ACME(control)
+            const double d1 = mean_y11 - mean_y10;  // ACME(treated)
+            const double z0 = mean_y10 - mean_y00;  // ADE(control)
+            const double z1 = mean_y11 - mean_y01;  // ADE(treated)
+            const double tau = mean_y11 - mean_y00; // total
+
+            return {d0, d1, z0, z1, tau};
+        }
 
         double sum_y00 = 0.0;
         double sum_y01 = 0.0;
         double sum_y10 = 0.0;
         double sum_y11 = 0.0;
 
-        for (int i = 0; i < n; ++i) {
-            double eta00 = by[0] + by[1] * M0[i] + by[2] * X0;
-            double eta01 = by[0] + by[1] * M1[i] + by[2] * X0;
-            double eta10 = by[0] + by[1] * M0[i] + by[2] * X1;
-            double eta11 = by[0] + by[1] * M1[i] + by[2] * X1;
+        if (fam_m == GlmFamily::Gaussian) {
+            double sd = std::sqrt(std::max(0.0, sigma2_m));
+            std::normal_distribution<double> nd(0.0, sd);
+            for (int i = 0; i < n; ++i) {
+                double e = nd(rng);
+                const double M0_i = eta_m0 + e;
+                const double M1_i = eta_m1 + e;
 
-            double y00 = linkinv(eta00, fam_y);
-            double y01 = linkinv(eta01, fam_y);
-            double y10 = linkinv(eta10, fam_y);
-            double y11 = linkinv(eta11, fam_y);
+                const double eta00 = by[0] + by[1] * M0_i + by[2] * X0;
+                const double eta01 = by[0] + by[1] * M1_i + by[2] * X0;
+                const double eta10 = by[0] + by[1] * M0_i + by[2] * X1;
+                const double eta11 = by[0] + by[1] * M1_i + by[2] * X1;
 
-            if (replace_outcome_) {
-                if (exposure_obs[i] == X0) {
-                    y00 = outcome_obs[i];
+                double y00 = linkinv(eta00, fam_y);
+                double y01 = linkinv(eta01, fam_y);
+                double y10 = linkinv(eta10, fam_y);
+                double y11 = linkinv(eta11, fam_y);
+
+                if (replace_outcome_) {
+                    if (exposure_obs[i] == X0) {
+                        y00 = outcome_obs[i];
+                    }
+                    if (exposure_obs[i] == X1) {
+                        y11 = outcome_obs[i];
+                    }
                 }
-                if (exposure_obs[i] == X1) {
-                    y11 = outcome_obs[i];
-                }
+
+                sum_y00 += y00;
+                sum_y01 += y01;
+                sum_y10 += y10;
+                sum_y11 += y11;
             }
+        } else if (fam_m == GlmFamily::Binomial) {
+            double p0 = inv_logit(eta_m0);
+            double p1 = inv_logit(eta_m1);
+            std::uniform_real_distribution<double> unif(0.0, 1.0);
+            for (int i = 0; i < n; ++i) {
+                const double M0_i = (unif(rng) < p0) ? 1.0 : 0.0;
+                const double M1_i = (unif(rng) < p1) ? 1.0 : 0.0;
 
-            sum_y00 += y00;
-            sum_y01 += y01;
-            sum_y10 += y10;
-            sum_y11 += y11;
+                const double eta00 = by[0] + by[1] * M0_i + by[2] * X0;
+                const double eta01 = by[0] + by[1] * M1_i + by[2] * X0;
+                const double eta10 = by[0] + by[1] * M0_i + by[2] * X1;
+                const double eta11 = by[0] + by[1] * M1_i + by[2] * X1;
+
+                double y00 = linkinv(eta00, fam_y);
+                double y01 = linkinv(eta01, fam_y);
+                double y10 = linkinv(eta10, fam_y);
+                double y11 = linkinv(eta11, fam_y);
+
+                if (replace_outcome_) {
+                    if (exposure_obs[i] == X0) {
+                        y00 = outcome_obs[i];
+                    }
+                    if (exposure_obs[i] == X1) {
+                        y11 = outcome_obs[i];
+                    }
+                }
+
+                sum_y00 += y00;
+                sum_y01 += y01;
+                sum_y10 += y10;
+                sum_y11 += y11;
+            }
+        } else {  // Poisson
+            double lam0 = safe_exp(eta_m0);
+            double lam1 = safe_exp(eta_m1);
+            std::poisson_distribution<int> p0(lam0);
+            std::poisson_distribution<int> p1(lam1);
+            for (int i = 0; i < n; ++i) {
+                const double M0_i = static_cast<double>(p0(rng));
+                const double M1_i = static_cast<double>(p1(rng));
+
+                const double eta00 = by[0] + by[1] * M0_i + by[2] * X0;
+                const double eta01 = by[0] + by[1] * M1_i + by[2] * X0;
+                const double eta10 = by[0] + by[1] * M0_i + by[2] * X1;
+                const double eta11 = by[0] + by[1] * M1_i + by[2] * X1;
+
+                double y00 = linkinv(eta00, fam_y);
+                double y01 = linkinv(eta01, fam_y);
+                double y10 = linkinv(eta10, fam_y);
+                double y11 = linkinv(eta11, fam_y);
+
+                if (replace_outcome_) {
+                    if (exposure_obs[i] == X0) {
+                        y00 = outcome_obs[i];
+                    }
+                    if (exposure_obs[i] == X1) {
+                        y11 = outcome_obs[i];
+                    }
+                }
+
+                sum_y00 += y00;
+                sum_y01 += y01;
+                sum_y10 += y10;
+                sum_y11 += y11;
+            }
         }
 
-        double mean_y00 = sum_y00 / static_cast<double>(n);
-        double mean_y01 = sum_y01 / static_cast<double>(n);
-        double mean_y10 = sum_y10 / static_cast<double>(n);
-        double mean_y11 = sum_y11 / static_cast<double>(n);
+        const double mean_y00 = sum_y00 / static_cast<double>(n);
+        const double mean_y01 = sum_y01 / static_cast<double>(n);
+        const double mean_y10 = sum_y10 / static_cast<double>(n);
+        const double mean_y11 = sum_y11 / static_cast<double>(n);
 
-        double d0 = mean_y01 - mean_y00;  // ACME(control)
-        double d1 = mean_y11 - mean_y10;  // ACME(treated)
-        double z0 = mean_y10 - mean_y00;  // ADE(control)
-        double z1 = mean_y11 - mean_y01;  // ADE(treated)
-        double tau = mean_y11 - mean_y00; // total
+        const double d0 = mean_y01 - mean_y00;  // ACME(control)
+        const double d1 = mean_y11 - mean_y10;  // ACME(treated)
+        const double z0 = mean_y10 - mean_y00;  // ADE(control)
+        const double z1 = mean_y11 - mean_y01;  // ADE(treated)
+        const double tau = mean_y11 - mean_y00; // total
 
         return {d0, d1, z0, z1, tau};
     }
@@ -734,36 +830,30 @@ private:
         auto z1_stats = calculate_statistics(z1_samples);
         auto tau_stats = calculate_statistics(tau_samples);
         
-        std::stringstream result_stream;
-        result_stream.imbue(std::locale::classic());
-        result_stream << std::fixed << std::setprecision(6);
-        result_stream << csv_escape(combination) << ",";
+        std::string result;
+        result.reserve(combination.size() + 512);
+        result += csv_escape(combination);
+        result.push_back(',');
         if (legacy_output_schema) {
-            write_statistics(result_stream, d0_stats);
-            result_stream << ",";
-            write_statistics(result_stream, z0_stats);
-            result_stream << ",";
-            write_statistics(result_stream, tau_stats);
+            append_statistics(result, d0_stats);
+            result.push_back(',');
+            append_statistics(result, z0_stats);
+            result.push_back(',');
+            append_statistics(result, tau_stats);
         } else {
-            write_statistics(result_stream, d0_stats);
-            result_stream << ",";
-            write_statistics(result_stream, d1_stats);
-            result_stream << ",";
-            write_statistics(result_stream, z0_stats);
-            result_stream << ",";
-            write_statistics(result_stream, z1_stats);
-            result_stream << ",";
-            write_statistics(result_stream, tau_stats);
+            append_statistics(result, d0_stats);
+            result.push_back(',');
+            append_statistics(result, d1_stats);
+            result.push_back(',');
+            append_statistics(result, z0_stats);
+            result.push_back(',');
+            append_statistics(result, z1_stats);
+            result.push_back(',');
+            append_statistics(result, tau_stats);
         }
-        result_stream << "\n";
+        result.push_back('\n');
         
-        return result_stream.str();
-    }
-    
-    void write_statistics(std::stringstream& stream,
-                          const StatisticsSummary& stats) {
-        stream << stats.mean << "," << stats.percentile_2_5 << ","
-               << stats.percentile_97_5 << "," << stats.p_value;
+        return result;
     }
 };
 
