@@ -1,4 +1,5 @@
 #include "glm_fit.h"
+#include "fastmed_glm_link.h"
 
 #include <algorithm>
 #include <cmath>
@@ -12,35 +13,6 @@ static inline std::string lower_copy(std::string s) {
                    s.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return s;
-}
-
-static inline double inv_logit(double x) {
-    if (x >= 0.0) {
-        double z = std::exp(-x);
-        return 1.0 / (1.0 + z);
-    }
-    double z = std::exp(x);
-    return z / (1.0 + z);
-}
-
-static inline double safe_exp(double x) {
-    if (x > 700.0) {
-        x = 700.0;
-    }
-    if (x < -700.0) {
-        x = -700.0;
-    }
-    return std::exp(x);
-}
-
-static inline double linkinv(double eta, GlmFamily fam) {
-    if (fam == GlmFamily::Gaussian) {
-        return eta;
-    }
-    if (fam == GlmFamily::Binomial) {
-        return inv_logit(eta);
-    }
-    return safe_exp(eta); // Poisson
 }
 
 static inline double linkfun(double mu, GlmFamily fam) {
@@ -90,7 +62,8 @@ static inline bool valid_mu(double mu, GlmFamily fam) {
     return (mu > 0.0); // Poisson
 }
 
-static inline void validate_y_for_family(const VectorXd& y, GlmFamily fam) {
+static inline void validate_y_for_family(const Eigen::Ref<const VectorXd>& y,
+                                         GlmFamily fam) {
     const double eps = 1e-8;
     if (fam == GlmFamily::Binomial) {
         for (int i = 0; i < y.size(); ++i) {
@@ -123,7 +96,7 @@ static inline void validate_y_for_family(const VectorXd& y, GlmFamily fam) {
     }
 }
 
-static inline GlmFamily detect_family_from_y(const VectorXd& y) {
+static inline GlmFamily detect_family_from_y(const Eigen::Ref<const VectorXd>& y) {
     const double eps = 1e-8;
     bool all01 = true;
     bool all_nonneg_int = true;
@@ -153,7 +126,8 @@ static inline GlmFamily detect_family_from_y(const VectorXd& y) {
     return GlmFamily::Gaussian;
 }
 
-GlmFamily parse_family_or_auto(const std::string& fam_str, const VectorXd& y) {
+GlmFamily parse_family_or_auto(const std::string& fam_str,
+                               const Eigen::Ref<const VectorXd>& y) {
     std::string f = lower_copy(fam_str);
     if (f == "auto") {
         return detect_family_from_y(y);
@@ -170,9 +144,9 @@ GlmFamily parse_family_or_auto(const std::string& fam_str, const VectorXd& y) {
     throw std::invalid_argument("Unknown family: " + fam_str);
 }
 
-static inline double deviance_glm(const VectorXd& y,
-                                 const VectorXd& mu,
-                                 const VectorXd& w,
+static inline double deviance_glm(const Eigen::Ref<const VectorXd>& y,
+                                 const Eigen::Ref<const VectorXd>& mu,
+                                 const Eigen::Ref<const VectorXd>& w,
                                  GlmFamily fam) {
     const double eps = 1e-15;
     double dev = 0.0;
@@ -215,8 +189,8 @@ static inline double deviance_glm(const VectorXd& y,
 }
 
 static inline VectorXd wls_solve_qr(const MatrixXd& X,
-                                    const VectorXd& z,
-                                    const VectorXd& sqrt_w,
+                                    const Eigen::Ref<const VectorXd>& z,
+                                    const Eigen::Ref<const VectorXd>& sqrt_w,
                                     double qr_tol,
                                     int* out_rank = nullptr) {
     MatrixXd Xw(X.rows(), X.cols());
@@ -240,8 +214,8 @@ static inline VectorXd wls_solve_qr(const MatrixXd& X,
 }
 
 static inline VectorXd wls_solve_qr_inplace(const MatrixXd& X,
-                                            const VectorXd& z,
-                                            const VectorXd& sqrt_w,
+                                            const Eigen::Ref<const VectorXd>& z,
+                                            const Eigen::Ref<const VectorXd>& sqrt_w,
                                             double qr_tol,
                                             MatrixXd& Xw,
                                             VectorXd& zw,
@@ -268,8 +242,8 @@ static inline VectorXd wls_solve_qr_inplace(const MatrixXd& X,
 }
 
 static inline bool wls_solve_ldlt_smallp(const MatrixXd& X,
-                                        const VectorXd& z,
-                                        const VectorXd& sqrt_w,
+                                        const Eigen::Ref<const VectorXd>& z,
+                                        const Eigen::Ref<const VectorXd>& sqrt_w,
                                         double tol,
                                         VectorXd& beta_out,
                                         int* out_rank = nullptr) {
@@ -336,11 +310,45 @@ static inline bool wls_solve_ldlt_smallp(const MatrixXd& X,
     return true;
 }
 
+static inline MatrixXd xtwx_smallp(const MatrixXd& X,
+                                   const Eigen::Ref<const VectorXd>& w) {
+    const int n = static_cast<int>(X.rows());
+    const int p = static_cast<int>(X.cols());
+    if (p <= 0 || p > 3) {
+        throw std::runtime_error("xtwx_smallp: only supports p in {1,2,3}");
+    }
+    if (w.size() != n) {
+        throw std::runtime_error("xtwx_smallp: dimension mismatch");
+    }
+
+    MatrixXd XtWX = MatrixXd::Zero(p, p);
+    for (int i = 0; i < n; ++i) {
+        const double wi = w[i];
+        if (!(wi > 0.0) || !std::isfinite(wi)) {
+            continue;
+        }
+        for (int j = 0; j < p; ++j) {
+            const double xij = X(i, j);
+            for (int k = j; k < p; ++k) {
+                XtWX(j, k) += wi * xij * X(i, k);
+            }
+        }
+    }
+
+    for (int j = 0; j < p; ++j) {
+        for (int k = j + 1; k < p; ++k) {
+            XtWX(k, j) = XtWX(j, k);
+        }
+    }
+
+    return XtWX;
+}
+
 GlmFit glm_fit_irls_qr(const MatrixXd& X,
-                       const VectorXd& y,
+                       const Eigen::Ref<const VectorXd>& y,
                        GlmFamily fam,
-                       const VectorXd& prior_w,
-                       const VectorXd& offset,
+                       const Eigen::Ref<const VectorXd>& prior_w,
+                       const Eigen::Ref<const VectorXd>& offset,
                        int maxit,
                        double epsilon,
                        double qr_tol,
@@ -436,8 +444,12 @@ GlmFit glm_fit_irls_qr(const MatrixXd& X,
     int it = 0;
     int rank = p;
 
+    VectorXd eta_tmp(n);
+    VectorXd mu_tmp(n);
+
     for (it = 0; it < maxit; ++it) {
-        eta = X * beta + offset;
+        eta.noalias() = X * beta;
+        eta += offset;
 
         for (int i = 0; i < n; ++i) {
             double mui = linkinv(eta[i], fam);
@@ -506,17 +518,17 @@ GlmFit glm_fit_irls_qr(const MatrixXd& X,
         }
 
         auto dev_for_beta = [&](const VectorXd& b, bool* out_valid_mu) -> double {
-            VectorXd e = X * b + offset;
-            VectorXd m(n);
+            eta_tmp.noalias() = X * b;
+            eta_tmp += offset;
             bool ok = true;
             for (int i = 0; i < n; ++i) {
-                double mui = linkinv(e[i], fam);
+                double mui = linkinv(eta_tmp[i], fam);
                 if (fam == GlmFamily::Binomial) {
                     mui = std::min(std::max(mui, 1e-12), 1.0 - 1e-12);
                 } else if (fam == GlmFamily::Poisson) {
                     mui = std::max(mui, 1e-12);
                 }
-                m[i] = mui;
+                mu_tmp[i] = mui;
                 if (!valid_mu(mui, fam)) {
                     ok = false;
                 }
@@ -524,7 +536,7 @@ GlmFit glm_fit_irls_qr(const MatrixXd& X,
             if (out_valid_mu) {
                 *out_valid_mu = ok;
             }
-            return deviance_glm(y, m, prior_w, fam);
+            return deviance_glm(y, mu_tmp, prior_w, fam);
         };
 
         bool mu_ok_new = true;
@@ -553,7 +565,8 @@ GlmFit glm_fit_irls_qr(const MatrixXd& X,
         }
     }
 
-    eta = X * beta + offset;
+    eta.noalias() = X * beta;
+    eta += offset;
     for (int i = 0; i < n; ++i) {
         double mui = linkinv(eta[i], fam);
         if (fam == GlmFamily::Binomial) {
@@ -581,7 +594,12 @@ GlmFit glm_fit_irls_qr(const MatrixXd& X,
         W[i] = prior_w[i] * (d * d) / v;
     }
 
-    MatrixXd XtWX = X.transpose() * W.asDiagonal() * X;
+    MatrixXd XtWX;
+    if (p <= 3) {
+        XtWX = xtwx_smallp(X, W);
+    } else {
+        XtWX = X.transpose() * W.asDiagonal() * X;
+    }
     XtWX = 0.5 * (XtWX + XtWX.transpose());
     Eigen::LDLT<MatrixXd> ldlt(XtWX);
     if (ldlt.info() != Eigen::Success) {
@@ -602,10 +620,10 @@ GlmFit glm_fit_irls_qr(const MatrixXd& X,
 }
 
 GlmFit glm_fit_irls_qr(const MatrixXd& X,
-                       const VectorXd& y,
+                       const Eigen::Ref<const VectorXd>& y,
                        GlmFamily fam,
-                       const VectorXd& prior_w,
-                       const VectorXd& offset,
+                       const Eigen::Ref<const VectorXd>& prior_w,
+                       const Eigen::Ref<const VectorXd>& offset,
                        int maxit,
                        double epsilon,
                        double qr_tol) {

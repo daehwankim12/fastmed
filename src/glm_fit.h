@@ -19,22 +19,23 @@ struct GlmFit {
     int rank;
 };
 
-GlmFamily parse_family_or_auto(const std::string& fam_str, const VectorXd& y);
+GlmFamily parse_family_or_auto(const std::string& fam_str,
+                               const Eigen::Ref<const VectorXd>& y);
 
 GlmFit glm_fit_irls_qr(const MatrixXd& X,
-                       const VectorXd& y,
+                       const Eigen::Ref<const VectorXd>& y,
                        GlmFamily fam,
-                       const VectorXd& prior_w,
-                       const VectorXd& offset,
+                       const Eigen::Ref<const VectorXd>& prior_w,
+                       const Eigen::Ref<const VectorXd>& offset,
                        int maxit,
                        double epsilon,
                        double qr_tol);
 
 GlmFit glm_fit_irls_qr(const MatrixXd& X,
-                       const VectorXd& y,
+                       const Eigen::Ref<const VectorXd>& y,
                        GlmFamily fam,
-                       const VectorXd& prior_w,
-                       const VectorXd& offset,
+                       const Eigen::Ref<const VectorXd>& prior_w,
+                       const Eigen::Ref<const VectorXd>& offset,
                        int maxit,
                        double epsilon,
                        double qr_tol,
