@@ -62,4 +62,3 @@ test_that("NA rows have NA for all effect columns", {
   effect_cols <- grep("(_estimate|_ci_lower|_ci_upper|_p)$", names(results), value = TRUE)
   expect_true(all(is.na(na_rows[, ..effect_cols])))
 })
-

@@ -45,7 +45,9 @@ test_that("fastmed roughly matches mediation::mediate() for Gaussian/Gaussian (a
 
   z975 <- stats::qnorm(0.975)
   se_or_ci <- function(se, ci) {
-    if (is.numeric(se) && length(se) == 1L && is.finite(se) && se >= 0) return(se)
+    if (is.numeric(se) && length(se) == 1L && is.finite(se) && se >= 0) {
+      return(se)
+    }
     if (is.numeric(ci) && length(ci) == 2L && all(is.finite(ci))) {
       return((ci[2] - ci[1]) / (2 * z975))
     }
@@ -54,7 +56,9 @@ test_that("fastmed roughly matches mediation::mediate() for Gaussian/Gaussian (a
 
   tol_from <- function(se, ci, extra = 0.05, mult = 3) {
     se_val <- se_or_ci(se, ci)
-    if (!is.finite(se_val)) return(0.5)
+    if (!is.finite(se_val)) {
+      return(0.5)
+    }
     mult * se_val + extra
   }
 
@@ -116,7 +120,9 @@ test_that("fastmed roughly matches mediation::mediate() for Gaussian/Gaussian (b
 
   z975 <- stats::qnorm(0.975)
   se_or_ci <- function(se, ci) {
-    if (is.numeric(se) && length(se) == 1L && is.finite(se) && se >= 0) return(se)
+    if (is.numeric(se) && length(se) == 1L && is.finite(se) && se >= 0) {
+      return(se)
+    }
     if (is.numeric(ci) && length(ci) == 2L && all(is.finite(ci))) {
       return((ci[2] - ci[1]) / (2 * z975))
     }
@@ -125,7 +131,9 @@ test_that("fastmed roughly matches mediation::mediate() for Gaussian/Gaussian (b
 
   tol_from <- function(se, ci, extra = 0.1, mult = 4) {
     se_val <- se_or_ci(se, ci)
-    if (!is.finite(se_val)) return(0.75)
+    if (!is.finite(se_val)) {
+      return(0.75)
+    }
     mult * se_val + extra
   }
 

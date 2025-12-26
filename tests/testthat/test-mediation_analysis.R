@@ -459,7 +459,7 @@ test_that("chunked analysis matches non-chunked (same seed)", {
   expect_equal(results1$Combination, results2$Combination)
 })
 
-test_that("append mode creates valid CSV with a single header", {
+test_that("writes a valid CSV with a single header", {
   set.seed(123)
   test_data <- data.table::data.table(
     EXP1 = rnorm(50),
@@ -549,10 +549,14 @@ test_that("statistics summary matches R reference implementation", {
 
   p_value_ref <- function(samples) {
     n <- length(samples)
-    if (n == 0) return(1.0)
+    if (n == 0) {
+      return(1.0)
+    }
 
     est <- mean(samples)
-    if (est == 0) return(1.0)
+    if (est == 0) {
+      return(1.0)
+    }
 
     pos <- sum(samples > 0)
     neg <- sum(samples < 0)

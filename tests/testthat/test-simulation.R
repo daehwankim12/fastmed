@@ -1,8 +1,12 @@
 test_that("mediate-style simulation matches an R reference implementation (gaussian mediator, binomial outcome)", {
   detect_family <- function(y) {
     eps <- 1e-8
-    if (all(abs(y) <= eps | abs(y - 1) <= eps)) return("binomial")
-    if (all(y >= -eps & abs(y - round(y)) <= eps)) return("poisson")
+    if (all(abs(y) <= eps | abs(y - 1) <= eps)) {
+      return("binomial")
+    }
+    if (all(y >= -eps & abs(y - round(y)) <= eps)) {
+      return("poisson")
+    }
     "gaussian"
   }
 

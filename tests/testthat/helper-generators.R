@@ -51,4 +51,3 @@ generate_mediation_data <- function(n = 100,
 
   data.frame(T = T, M = M, Y = Y)
 }
-
