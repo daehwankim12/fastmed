@@ -167,12 +167,12 @@ test_that("asymptotic method errors on singular design matrix", {
   )
 })
 
-test_that("p-values use sign test with continuity correction", {
+test_that("p-values use mediate sign test", {
   set.seed(123)
   n <- 200
   x <- rep(c(0, 1), each = n / 2)
-  m <- 10 * x + rnorm(n, sd = 0.1)
-  y <- 10 * m + rnorm(n, sd = 0.1)
+  m <- 100 + 50 * x + rnorm(n, sd = 0.01)
+  y <- 10 + 20 * m + 10 * x + rnorm(n, sd = 0.01)
 
   test_data_strong <- data.table::data.table(EXP1 = x, MED1 = m, OUT1 = y)
   output_csv <- withr::local_tempfile(fileext = ".csv")
@@ -184,7 +184,8 @@ test_that("p-values use sign test with continuity correction", {
     nrep = nrep,
     output_file = output_csv,
     num_threads = 1,
-    pert = "asymptotic"
+    pert = "asymptotic",
+    seed = 1
   )
 
   results <- data.table::fread(output_csv)
@@ -193,10 +194,9 @@ test_that("p-values use sign test with continuity correction", {
   p_value <- results[["ACME_p-value"]]
   expect_true(is.numeric(p_value))
   expect_equal(length(p_value), 1)
-  expect_gt(p_value, 0)
-  expect_lt(p_value, 1)
-  expect_gte(p_value, 2 / (nrep + 2))
-  expect_lte(p_value, 0.2)
+  expect_gte(p_value, 0)
+  expect_lte(p_value, 1)
+  expect_lte(p_value, 0.05)
 })
 
 test_that("NA data is rejected with clear error", {
@@ -508,42 +508,60 @@ test_that("p-value deterministic fixtures match definition", {
 
   n <- 100
   p_all_pos <- fastmed:::fastmed_test_p_value_cpp(rep(1, n))
-  expect_equal(p_all_pos, 2 / (n + 2), tolerance = 1e-12)
+  expect_equal(p_all_pos, 0.0, tolerance = 1e-12)
 
   p_balanced <- fastmed:::fastmed_test_p_value_cpp(c(rep(-1, n / 2), rep(1, n / 2)))
   expect_equal(p_balanced, 1.0)
 
   p_zeros_split <- fastmed:::fastmed_test_p_value_cpp(c(0, 0, 0, 1))
-  expect_equal(p_zeros_split, 5 / 6, tolerance = 1e-12)
+  expect_equal(p_zeros_split, 0.0, tolerance = 1e-12)
+
+  p_all_zero <- fastmed:::fastmed_test_p_value_cpp(rep(0, n))
+  expect_equal(p_all_zero, 1.0, tolerance = 1e-12)
+})
+
+test_that("p-value matches mediation:::pval when available", {
+  skip_if_not_installed("mediation")
+
+  pval <- getFromNamespace("pval", "mediation")
+  sims <- c(rep(1, 100), -1)
+  est <- mean(sims)
+
+  expected <- if ("c0" %in% names(formals(pval))) {
+    pval(sims, c0 = est)
+  } else {
+    pval(sims)
+  }
+
+  got <- fastmed:::fastmed_test_p_value_cpp(sims)
+  expect_equal(got, expected, tolerance = 1e-12)
 })
 
 test_that("statistics summary matches R reference implementation", {
-  percentile_ref <- function(samples, perc) {
-    n <- length(samples)
-    if (n == 0) stop("empty samples")
-    k <- floor((n - 1) * perc / 100) + 1L
-    sort(samples)[k]
+  quantile_ref <- function(samples, prob) {
+    as.numeric(stats::quantile(samples, prob, type = 7, names = FALSE))
   }
 
   p_value_ref <- function(samples) {
     n <- length(samples)
     if (n == 0) return(1.0)
 
+    est <- mean(samples)
+    if (est == 0) return(1.0)
+
     pos <- sum(samples > 0)
     neg <- sum(samples < 0)
-    zero <- n - pos - neg
 
-    pos_eff <- pos + 0.5 * zero
-    prop <- (pos_eff + 1) / (n + 2)
-    2 * min(prop, 1 - prop)
+    p <- 2 * min(pos, neg) / n
+    min(p, 1.0)
   }
 
   samples <- c(seq(-2, 2, length.out = 101), 0, 0, 0)
   stats_cpp <- fastmed:::fastmed_test_calculate_statistics_cpp(samples)
 
   expect_equal(stats_cpp$mean, mean(samples), tolerance = 1e-12)
-  expect_equal(stats_cpp$percentile_2_5, percentile_ref(samples, 2.5), tolerance = 1e-12)
-  expect_equal(stats_cpp$percentile_97_5, percentile_ref(samples, 97.5), tolerance = 1e-12)
+  expect_equal(stats_cpp$percentile_2_5, quantile_ref(samples, 0.025), tolerance = 1e-12)
+  expect_equal(stats_cpp$percentile_97_5, quantile_ref(samples, 0.975), tolerance = 1e-12)
   expect_equal(stats_cpp$p_value, p_value_ref(samples), tolerance = 1e-12)
 })
 

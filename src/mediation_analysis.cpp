@@ -2,6 +2,7 @@
 #include <Rcpp.h>
 #include <RcppEigen.h>
 #include <RcppParallel.h>
+#include "glm_fit.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -25,8 +26,6 @@ using namespace Rcpp;
 using namespace RcppParallel;
 using namespace Eigen;
 
-const double PERCENTILE_2_5 = 2.5;
-const double PERCENTILE_97_5 = 97.5;
 const double X0 = 0.0;
 const double X1 = 1.0;
 
@@ -44,38 +43,60 @@ double mean_cpp(const std::vector<double>& data) {
     return std::accumulate(data.begin(), data.end(), 0.0) / data.size();
 }
 
-double percentile_cpp(const std::vector<double>& data, double perc) {
-    if (data.empty()) {
-        throw std::runtime_error("Cannot calculate percentile of empty vector");
+// R default quantile: type = 7
+double quantile_type7(std::vector<double> x, double prob) {
+    if (x.empty()) {
+        throw std::runtime_error("quantile_type7: empty");
     }
-    std::vector<double> sorted_data = data;
-    size_t n = sorted_data.size();
-    size_t k = static_cast<size_t>((n - 1) * perc / 100.0);
-    std::nth_element(sorted_data.begin(), sorted_data.begin() + k,
-                     sorted_data.end());
-    return sorted_data[k];
+    if (!(prob >= 0.0 && prob <= 1.0)) {
+        throw std::invalid_argument("quantile_type7: prob must be in [0,1]");
+    }
+
+    std::sort(x.begin(), x.end());
+    const size_t n = x.size();
+    if (n == 1) {
+        return x[0];
+    }
+
+    const double h = (static_cast<double>(n) - 1.0) * prob + 1.0; // 1-indexed
+    const double hf = std::floor(h);
+    size_t j = static_cast<size_t>(hf); // 1..n
+    const double g = h - hf;
+
+    if (j <= 1) {
+        return x[0];
+    }
+    if (j >= n) {
+        return x[n - 1];
+    }
+
+    const size_t idx = j - 1; // 0-index
+    return (1.0 - g) * x[idx] + g * x[idx + 1];
 }
 
-double p_value_cpp(const std::vector<double>& samples) {
-    size_t n = samples.size();
-    if (n == 0) {
+// mediation::pval-style sign test:
+// if estimate == 0 => 1; else p = 2*min(#pos,#neg)/N
+double pval_mediate(const std::vector<double>& sims, double estimate) {
+    if (sims.empty()) {
+        return 1.0;
+    }
+    if (estimate == 0.0) {
         return 1.0;
     }
 
     size_t pos = 0;
     size_t neg = 0;
-    for (double v : samples) {
+    for (double v : sims) {
         if (v > 0) {
             ++pos;
         } else if (v < 0) {
             ++neg;
         }
     }
-    size_t zero = n - pos - neg;
 
-    double pos_eff = static_cast<double>(pos) + 0.5 * static_cast<double>(zero);
-    double prop = (pos_eff + 1.0) / (static_cast<double>(n) + 2.0);
-    return 2.0 * std::min(prop, 1.0 - prop);
+    double p = 2.0 * static_cast<double>(std::min(pos, neg)) /
+               static_cast<double>(sims.size());
+    return (p > 1.0 ? 1.0 : p);
 }
 
 uint64_t derive_seed(uint64_t base_seed,
@@ -126,9 +147,12 @@ MatrixXd cholesky_lower_or_throw(MatrixXd cov, const std::string& context) {
 }
 
 StatisticsSummary calculate_statistics(const std::vector<double>& samples) {
-    return {mean_cpp(samples), percentile_cpp(samples, PERCENTILE_2_5),
-            percentile_cpp(samples, PERCENTILE_97_5),
-            p_value_cpp(samples)};
+    const double est = mean_cpp(samples);
+    const double alpha = 0.05;
+    return {est,
+            quantile_type7(samples, alpha / 2.0),
+            quantile_type7(samples, 1.0 - alpha / 2.0),
+            pval_mediate(samples, est)};
 }
 
 Eigen::VectorXd linear_regression(const Eigen::MatrixXd& X,
@@ -679,7 +703,11 @@ void mediation_analysis_cpp(NumericMatrix data, CharacterVector column_names,
 // [[Rcpp::export]]
 double fastmed_test_p_value_cpp(NumericVector samples) {
     std::vector<double> vec = as<std::vector<double>>(samples);
-    return p_value_cpp(vec);
+    if (vec.empty()) {
+        return 1.0;
+    }
+    const double est = mean_cpp(vec);
+    return pval_mediate(vec, est);
 }
 
 // [[Rcpp::export]]

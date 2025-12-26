@@ -39,3 +39,5 @@ inst/doc
 .idea
 src/*.o
 src/*.so
+.Rlib
+

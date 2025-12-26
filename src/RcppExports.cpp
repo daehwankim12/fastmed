@@ -11,6 +11,24 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
+// glm_fit_cpp
+Rcpp::List glm_fit_cpp(const Eigen::MatrixXd& X, const Eigen::VectorXd& y, std::string family, Rcpp::Nullable<Rcpp::NumericVector> weights, Rcpp::Nullable<Rcpp::NumericVector> offset, int maxit, double epsilon, double qr_tol);
+RcppExport SEXP _fastmed_glm_fit_cpp(SEXP XSEXP, SEXP ySEXP, SEXP familySEXP, SEXP weightsSEXP, SEXP offsetSEXP, SEXP maxitSEXP, SEXP epsilonSEXP, SEXP qr_tolSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const Eigen::MatrixXd& >::type X(XSEXP);
+    Rcpp::traits::input_parameter< const Eigen::VectorXd& >::type y(ySEXP);
+    Rcpp::traits::input_parameter< std::string >::type family(familySEXP);
+    Rcpp::traits::input_parameter< Rcpp::Nullable<Rcpp::NumericVector> >::type weights(weightsSEXP);
+    Rcpp::traits::input_parameter< Rcpp::Nullable<Rcpp::NumericVector> >::type offset(offsetSEXP);
+    Rcpp::traits::input_parameter< int >::type maxit(maxitSEXP);
+    Rcpp::traits::input_parameter< double >::type epsilon(epsilonSEXP);
+    Rcpp::traits::input_parameter< double >::type qr_tol(qr_tolSEXP);
+    rcpp_result_gen = Rcpp::wrap(glm_fit_cpp(X, y, family, weights, offset, maxit, epsilon, qr_tol));
+    return rcpp_result_gen;
+END_RCPP
+}
 // mediation_analysis_cpp
 void mediation_analysis_cpp(NumericMatrix data, CharacterVector column_names, DataFrame combinations, int nrep, std::string output_file, std::string pert, uint64_t base_seed, bool append);
 RcppExport SEXP _fastmed_mediation_analysis_cpp(SEXP dataSEXP, SEXP column_namesSEXP, SEXP combinationsSEXP, SEXP nrepSEXP, SEXP output_fileSEXP, SEXP pertSEXP, SEXP base_seedSEXP, SEXP appendSEXP) {
@@ -79,6 +97,7 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
+    {"_fastmed_glm_fit_cpp", (DL_FUNC) &_fastmed_glm_fit_cpp, 8},
     {"_fastmed_mediation_analysis_cpp", (DL_FUNC) &_fastmed_mediation_analysis_cpp, 8},
     {"_fastmed_fastmed_test_p_value_cpp", (DL_FUNC) &_fastmed_fastmed_test_p_value_cpp, 1},
     {"_fastmed_fastmed_test_calculate_statistics_cpp", (DL_FUNC) &_fastmed_fastmed_test_calculate_statistics_cpp, 1},
