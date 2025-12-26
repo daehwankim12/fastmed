@@ -40,4 +40,6 @@ inst/doc
 src/*.o
 src/*.so
 .Rlib
+renv
+.renv_root
 

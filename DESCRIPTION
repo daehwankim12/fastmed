@@ -1,12 +1,15 @@
 Package: fastmed
 Type: Package
 Title: Mediation Analysis with Selected Column Prefixes Using Parallel Processing
-Version: 0.1.0
-Date: 2024-10-15
+Version: 0.2.0
+Date: 2025-12-27
 Authors@R: person("Daehwan", "Kim", email = "kdh5358@snu.ac.kr", role = c("aut", "cre", "cph"))
 Author: Daehwan Kim [aut, cre, cph]
 Maintainer: Daehwan Kim <kdh5358@snu.ac.kr>
-Description: Performs mediation analysis using multiple linear regressions and bootstrapping. Allows customization of column prefixes and utilizes parallel processing for efficiency.
+Description: Performs batch mediation analysis using generalized linear models
+    (Gaussian/Binomial/Poisson) and either quasi-Bayesian (asymptotic)
+    simulation or bootstrap resampling. Allows customization of column prefixes
+    and uses parallel processing for efficiency.
 URL: https://github.com/daehwankim12/fastmed
 BugReports: https://github.com/daehwankim12/fastmed/issues
 License: MIT + file LICENSE
