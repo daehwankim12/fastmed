@@ -19,9 +19,11 @@ LinkingTo:
     RcppEigen,
     RcppParallel
 Suggests:
+    knitr,
     rmarkdown,
     withr,
     testthat (>= 3.0.0)
+VignetteBuilder: knitr
 Encoding: UTF-8
 RoxygenNote: 7.3.2
 Config/testthat/edition: 3
