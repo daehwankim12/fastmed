@@ -27,6 +27,6 @@ test_that("rank-deficient combinations produce NA rows (not abort)", {
   results <- data.table::fread(output_csv)
   expect_equal(nrow(results), 2)
 
-  expect_true(any(is.na(results$ACME_Mean)))
-  expect_true(any(!is.na(results$ACME_Mean)))
+  expect_true(any(is.na(results$d0_estimate)))
+  expect_true(any(!is.na(results$d0_estimate)))
 })

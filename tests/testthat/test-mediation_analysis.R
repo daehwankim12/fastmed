@@ -169,7 +169,7 @@ test_that("singular design matrix yields NA output row", {
   results <- data.table::fread(output_csv)
   expect_equal(nrow(results), 1)
   expect_equal(results$Combination, "EXP1_MED1_OUT1")
-  expect_true(is.na(results$ACME_Mean))
+  expect_true(is.na(results$d0_estimate))
 })
 
 test_that("p-values use mediate sign test", {
@@ -196,7 +196,7 @@ test_that("p-values use mediate sign test", {
   results <- data.table::fread(output_csv)
   expect_equal(nrow(results), 1)
 
-  p_value <- results[["ACME_p-value"]]
+  p_value <- results[["d0_p"]]
   expect_true(is.numeric(p_value))
   expect_equal(length(p_value), 1)
   expect_gte(p_value, 0)
@@ -630,9 +630,11 @@ test_that("output schema and row ordering are deterministic", {
 
   expected_names <- c(
     "Combination",
-    "ACME_Mean", "ACME_2.5%", "ACME_97.5%", "ACME_p-value",
-    "ADE_Mean", "ADE_2.5%", "ADE_97.5%", "ADE_p-value",
-    "Total_Effect_Mean", "Total_Effect_2.5%", "Total_Effect_97.5%", "Total_Effect_p-value"
+    "d0_estimate", "d0_ci_lower", "d0_ci_upper", "d0_p",
+    "d1_estimate", "d1_ci_lower", "d1_ci_upper", "d1_p",
+    "z0_estimate", "z0_ci_lower", "z0_ci_upper", "z0_p",
+    "z1_estimate", "z1_ci_lower", "z1_ci_upper", "z1_p",
+    "tau_estimate", "tau_ci_lower", "tau_ci_upper", "tau_p"
   )
   expect_equal(names(results), expected_names)
 

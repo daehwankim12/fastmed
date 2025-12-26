@@ -83,11 +83,18 @@ print(results)
 - `num_threads`: (Optional) Number of threads for parallel processing. Defaults to the number of available cores.
 - `pert`: (Optional) Uncertainty method, one of `"asymptotic"` or `"bootstrap"`. Default is `"asymptotic"`.
 - `seed`: (Optional) Non-negative integer seed for reproducible results across thread counts (within the same build/runtime environment).
-- `chunk_size`: (Optional) Maximum number of combinations to process per C++ call; smaller values reduce peak memory usage for very large analyses.
+- `chunk_size`: (Optional) Maximum number of combinations to buffer per chunk inside the C++ backend; smaller values reduce peak memory usage for very large analyses.
+- `output.format`: (Optional) Output CSV schema. `"mediate"` (default) writes mediate-style effect columns; `"legacy"` writes the previous schema.
 
 ### Output
 
 The output CSV file will contain detailed results for each combination of exposure, mediator, and outcome variables, including mean estimates, 95% percentile confidence intervals, and p-values for indirect, direct, and total effects.
+
+Default schema (`output.format = "mediate"`):
+
+```
+Combination,d0_estimate,d0_ci_lower,d0_ci_upper,d0_p,d1_estimate,d1_ci_lower,d1_ci_upper,d1_p,z0_estimate,z0_ci_lower,z0_ci_upper,z0_p,z1_estimate,z1_ci_lower,z1_ci_upper,z1_p,tau_estimate,tau_ci_lower,tau_ci_upper,tau_p
+```
 
 ### p-value definition
 

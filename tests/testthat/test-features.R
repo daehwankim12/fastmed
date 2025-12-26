@@ -36,7 +36,7 @@ test_that("replace.outcome changes results", {
   expect_equal(nrow(res_replace), 1)
 
   expect_gt(
-    abs(res_no_replace[["Total_Effect_Mean"]] - res_replace[["Total_Effect_Mean"]]),
+    abs(res_no_replace[["tau_estimate"]] - res_replace[["tau_estimate"]]),
     1e-6
   )
 })
@@ -53,9 +53,9 @@ test_that("family auto-detection matches explicit family selection", {
 
   auto_1 <- run_mediation_once(data_pois_binom, mediator.family = "auto", outcome.family = "auto")
   exp_1 <- run_mediation_once(data_pois_binom, mediator.family = "poisson", outcome.family = "binomial")
-  expect_equal(auto_1[["ACME_Mean"]], exp_1[["ACME_Mean"]])
-  expect_equal(auto_1[["ADE_Mean"]], exp_1[["ADE_Mean"]])
-  expect_equal(auto_1[["Total_Effect_Mean"]], exp_1[["Total_Effect_Mean"]])
+  for (col in c("d0_estimate", "d1_estimate", "z0_estimate", "z1_estimate", "tau_estimate")) {
+    expect_equal(auto_1[[col]], exp_1[[col]])
+  }
 
   m2 <- stats::rbinom(n, 1, stats::plogis(0.2 + 0.7 * x))
   y2 <- stats::rpois(n, lambda = exp(0.1 + 0.2 * m2 + 0.3 * x))
@@ -63,9 +63,9 @@ test_that("family auto-detection matches explicit family selection", {
 
   auto_2 <- run_mediation_once(data_binom_pois, mediator.family = "auto", outcome.family = "auto")
   exp_2 <- run_mediation_once(data_binom_pois, mediator.family = "binomial", outcome.family = "poisson")
-  expect_equal(auto_2[["ACME_Mean"]], exp_2[["ACME_Mean"]])
-  expect_equal(auto_2[["ADE_Mean"]], exp_2[["ADE_Mean"]])
-  expect_equal(auto_2[["Total_Effect_Mean"]], exp_2[["Total_Effect_Mean"]])
+  for (col in c("d0_estimate", "d1_estimate", "z0_estimate", "z1_estimate", "tau_estimate")) {
+    expect_equal(auto_2[[col]], exp_2[[col]])
+  }
 
   m3 <- 0.1 + 0.5 * x + stats::rnorm(n)
   y3 <- 1.0 + 0.3 * m3 + 0.2 * x + stats::rnorm(n)
@@ -73,9 +73,9 @@ test_that("family auto-detection matches explicit family selection", {
 
   auto_3 <- run_mediation_once(data_gauss_gauss, mediator.family = "auto", outcome.family = "auto")
   exp_3 <- run_mediation_once(data_gauss_gauss, mediator.family = "gaussian", outcome.family = "gaussian")
-  expect_equal(auto_3[["ACME_Mean"]], exp_3[["ACME_Mean"]])
-  expect_equal(auto_3[["ADE_Mean"]], exp_3[["ADE_Mean"]])
-  expect_equal(auto_3[["Total_Effect_Mean"]], exp_3[["Total_Effect_Mean"]])
+  for (col in c("d0_estimate", "d1_estimate", "z0_estimate", "z1_estimate", "tau_estimate")) {
+    expect_equal(auto_3[[col]], exp_3[[col]])
+  }
 })
 
 test_that("explicit family selection overrides auto-detection", {

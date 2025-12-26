@@ -51,7 +51,9 @@ test_that("mediate-style simulation matches an R reference implementation (gauss
     n <- nrow(data)
 
     d0 <- numeric(sims)
+    d1 <- numeric(sims)
     z0 <- numeric(sims)
+    z1 <- numeric(sims)
     tau <- numeric(sims)
 
     set.seed(seed)
@@ -94,14 +96,18 @@ test_that("mediate-style simulation matches an R reference implementation (gauss
       mean_y11 <- mean(y11)
 
       d0[s] <- mean_y01 - mean_y00
+      d1[s] <- mean_y11 - mean_y10
       z0[s] <- mean_y10 - mean_y00
+      z1[s] <- mean_y11 - mean_y01
       tau[s] <- mean_y11 - mean_y00
     }
 
     list(
-      acme = mean(d0),
-      ade = mean(z0),
-      total = mean(tau)
+      d0 = mean(d0),
+      d1 = mean(d1),
+      z0 = mean(z0),
+      z1 = mean(z1),
+      tau = mean(tau)
     )
   }
 
@@ -133,8 +139,9 @@ test_that("mediate-style simulation matches an R reference implementation (gauss
   results <- data.table::fread(output_csv)
   expect_equal(nrow(results), 1)
 
-  expect_equal(results$ACME_Mean, ref$acme, tolerance = 0.10)
-  expect_equal(results$ADE_Mean, ref$ade, tolerance = 0.10)
-  expect_equal(results$Total_Effect_Mean, ref$total, tolerance = 0.10)
+  expect_equal(results$d0_estimate, ref$d0, tolerance = 0.10)
+  expect_equal(results$d1_estimate, ref$d1, tolerance = 0.10)
+  expect_equal(results$z0_estimate, ref$z0, tolerance = 0.10)
+  expect_equal(results$z1_estimate, ref$z1, tolerance = 0.10)
+  expect_equal(results$tau_estimate, ref$tau, tolerance = 0.10)
 })
-

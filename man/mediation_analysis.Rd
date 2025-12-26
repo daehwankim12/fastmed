@@ -52,6 +52,11 @@ values reduce peak memory usage. Default is 10000.}
 \item{replace.outcome}{Logical; if TRUE, replace the simulated `Y(0,M(0))`
 for observed controls and `Y(1,M(1))` for observed treated units with the
 observed outcome. Default is FALSE.}
+
+\item{output.format}{Output CSV schema. `"mediate"` writes mediate-style
+effect columns (`d0`, `d1`, `z0`, `z1`, `tau`). `"legacy"` writes the
+previous schema (`ACME_*`, `ADE_*`, `Total_Effect_*`). Default is
+`"mediate"`.}
 }
 \value{
 None.  The results are written to the specified `output_file` in CSV format.
@@ -64,12 +69,17 @@ effects. Results are written to a CSV file.
 }
 \details{
 This function estimates the following effects:
-* **ACME(0):** Average causal mediation (indirect) effect at baseline treatment.
-* **ADE(0):** Average direct effect at baseline treatment.
-* **Total Effect:**  The total effect of the exposure on the outcome, both direct and indirect.
+* **d0:** ACME(control) average causal mediation effect.
+* **d1:** ACME(treated) average causal mediation effect.
+* **z0:** ADE(control) average direct effect.
+* **z1:** ADE(treated) average direct effect.
+* **tau:** Total effect.
 
 The output CSV file includes mean estimates, 95% percentile confidence
 intervals, and p-values for each effect and combination of variables.
+
+The default output schema (`output.format = "mediate"`) is:
+\preformatted{Combination,d0_estimate,d0_ci_lower,d0_ci_upper,d0_p,d1_estimate,d1_ci_lower,d1_ci_upper,d1_p,z0_estimate,z0_ci_lower,z0_ci_upper,z0_p,z1_estimate,z1_ci_lower,z1_ci_upper,z1_p,tau_estimate,tau_ci_lower,tau_ci_upper,tau_p}
 
 Family auto-detection is based on the response values:
 * All values in `{0,1}` -> Binomial

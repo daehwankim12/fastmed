@@ -303,6 +303,7 @@ private:
     const std::string mediator_family;
     const std::string outcome_family;
     const bool replace_outcome;
+    const bool legacy_output_schema;
     const uint64_t base_seed;
     const size_t chunk_begin;
     std::vector<std::string>& output_lines;
@@ -318,6 +319,7 @@ public:
                     const std::string& mediator_family_,
                     const std::string& outcome_family_,
                     bool replace_outcome_,
+                    bool legacy_output_schema_,
                     uint64_t base_seed_,
                     size_t chunk_begin_,
                     std::vector<std::string>& output_lines_)
@@ -331,6 +333,7 @@ public:
           mediator_family(mediator_family_),
           outcome_family(outcome_family_),
           replace_outcome(replace_outcome_),
+          legacy_output_schema(legacy_output_schema_),
           base_seed(base_seed_),
           chunk_begin(chunk_begin_),
           output_lines(output_lines_) {}
@@ -351,7 +354,8 @@ private:
         std::stringstream result_stream;
         result_stream.imbue(std::locale::classic());
         result_stream << csv_escape(combination);
-        for (int i = 0; i < 12; ++i) {
+        const int na_cols = legacy_output_schema ? 12 : 20;
+        for (int i = 0; i < na_cols; ++i) {
             result_stream << ",NA";
         }
         result_stream << "\n";
@@ -708,30 +712,49 @@ private:
         std::string combination =
             exposure_col + "_" + mediator_col + "_" + outcome_col;
         
-        std::vector<double> acme_samples, ade_samples, total_samples;
-        acme_samples.reserve(nrep);
-        ade_samples.reserve(nrep);
-        total_samples.reserve(nrep);
+        std::vector<double> d0_samples, d1_samples, z0_samples, z1_samples,
+            tau_samples;
+        d0_samples.reserve(nrep);
+        d1_samples.reserve(nrep);
+        z0_samples.reserve(nrep);
+        z1_samples.reserve(nrep);
+        tau_samples.reserve(nrep);
         
         for (const auto& result : results) {
-            acme_samples.push_back(result.indirect_effect_0);  // ACME
-            ade_samples.push_back(result.direct_effect_0);     // ADE
-            total_samples.push_back(result.total_effect);      // Total effect
+            d0_samples.push_back(result.indirect_effect_0); // ACME(control)
+            d1_samples.push_back(result.indirect_effect_1); // ACME(treated)
+            z0_samples.push_back(result.direct_effect_0);   // ADE(control)
+            z1_samples.push_back(result.direct_effect_1);   // ADE(treated)
+            tau_samples.push_back(result.total_effect);     // total effect
         }
         
-        auto acme_stats = calculate_statistics(acme_samples);
-        auto ade_stats = calculate_statistics(ade_samples);
-        auto total_stats = calculate_statistics(total_samples);
+        auto d0_stats = calculate_statistics(d0_samples);
+        auto d1_stats = calculate_statistics(d1_samples);
+        auto z0_stats = calculate_statistics(z0_samples);
+        auto z1_stats = calculate_statistics(z1_samples);
+        auto tau_stats = calculate_statistics(tau_samples);
         
         std::stringstream result_stream;
         result_stream.imbue(std::locale::classic());
         result_stream << std::fixed << std::setprecision(6);
         result_stream << csv_escape(combination) << ",";
-        write_statistics(result_stream, acme_stats);
-        result_stream << ",";
-        write_statistics(result_stream, ade_stats);
-        result_stream << ",";
-        write_statistics(result_stream, total_stats);
+        if (legacy_output_schema) {
+            write_statistics(result_stream, d0_stats);
+            result_stream << ",";
+            write_statistics(result_stream, z0_stats);
+            result_stream << ",";
+            write_statistics(result_stream, tau_stats);
+        } else {
+            write_statistics(result_stream, d0_stats);
+            result_stream << ",";
+            write_statistics(result_stream, d1_stats);
+            result_stream << ",";
+            write_statistics(result_stream, z0_stats);
+            result_stream << ",";
+            write_statistics(result_stream, z1_stats);
+            result_stream << ",";
+            write_statistics(result_stream, tau_stats);
+        }
         result_stream << "\n";
         
         return result_stream.str();
@@ -757,6 +780,7 @@ void mediation_analysis_cpp(NumericMatrix data,
                             std::string mediator_family = "auto",
                             std::string outcome_family = "auto",
                             bool replace_outcome = false,
+                            std::string output_format = "mediate",
                             int chunk_size = 1024,
                             int grain_size = 1) {
     try {
@@ -849,12 +873,34 @@ void mediation_analysis_cpp(NumericMatrix data,
         if (!output_stream.is_open()) {
             throw std::runtime_error("Failed to open output file: " + output_file);
         }
+
+        const bool legacy_output_schema = [&]() {
+            if (output_format == "legacy") {
+                return true;
+            }
+            if (output_format == "mediate") {
+                return false;
+            }
+            throw std::invalid_argument(
+                "output_format must be one of: mediate, legacy");
+        }();
         
-        std::string header =
-            "Combination,ACME_Mean,ACME_2.5%,ACME_97.5%,ACME_p-value,"
-            "ADE_Mean,ADE_2.5%,ADE_97.5%,ADE_p-value,"
-            "Total_Effect_Mean,Total_Effect_2.5%,Total_Effect_97.5%,Total_"
-            "Effect_p-value\n";
+        std::string header;
+        if (legacy_output_schema) {
+            header =
+                "Combination,ACME_Mean,ACME_2.5%,ACME_97.5%,ACME_p-value,"
+                "ADE_Mean,ADE_2.5%,ADE_97.5%,ADE_p-value,"
+                "Total_Effect_Mean,Total_Effect_2.5%,Total_Effect_97.5%,Total_"
+                "Effect_p-value\n";
+        } else {
+            header =
+                "Combination,"
+                "d0_estimate,d0_ci_lower,d0_ci_upper,d0_p,"
+                "d1_estimate,d1_ci_lower,d1_ci_upper,d1_p,"
+                "z0_estimate,z0_ci_lower,z0_ci_upper,z0_p,"
+                "z1_estimate,z1_ci_lower,z1_ci_upper,z1_p,"
+                "tau_estimate,tau_ci_lower,tau_ci_upper,tau_p\n";
+        }
         output_stream << header;
 
         const size_t chunk_size_cpp = static_cast<size_t>(chunk_size);
@@ -876,6 +922,7 @@ void mediation_analysis_cpp(NumericMatrix data,
                                    mediator_family,
                                    outcome_family,
                                    replace_outcome,
+                                   legacy_output_schema,
                                    base_seed,
                                    chunk_begin,
                                    chunk_results);

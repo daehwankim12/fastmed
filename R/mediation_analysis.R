@@ -28,12 +28,18 @@
 #' @param replace.outcome Logical; if TRUE, replace the simulated `Y(0,M(0))`
 #'   for observed controls and `Y(1,M(1))` for observed treated units with the
 #'   observed outcome. Default is FALSE.
+#' @param output.format Output CSV schema. `"mediate"` writes mediate-style
+#'   effect columns (`d0`, `d1`, `z0`, `z1`, `tau`). `"legacy"` writes the
+#'   previous schema (`ACME_*`, `ADE_*`, `Total_Effect_*`). Default is
+#'   `"mediate"`.
 #' @return None.  The results are written to the specified `output_file` in CSV format.
 #'
 #' @details This function estimates the following effects:
-#' * **ACME(0):** Average causal mediation (indirect) effect at baseline treatment.
-#' * **ADE(0):** Average direct effect at baseline treatment.
-#' * **Total Effect:**  The total effect of the exposure on the outcome, both direct and indirect.
+#' * **d0:** ACME(control) average causal mediation effect.
+#' * **d1:** ACME(treated) average causal mediation effect.
+#' * **z0:** ADE(control) average direct effect.
+#' * **z1:** ADE(treated) average direct effect.
+#' * **tau:** Total effect.
 #'
 #' The output CSV file includes mean estimates, 95% percentile confidence
 #' intervals, and p-values for each effect and combination of variables.
@@ -82,7 +88,8 @@ mediation_analysis <- function(data,
                                chunk_size = 10000,
                                mediator.family = "auto",
                                outcome.family = "auto",
-                               replace.outcome = FALSE) {
+                               replace.outcome = FALSE,
+                               output.format = c("mediate", "legacy")) {
   if (!is.numeric(nrep) || length(nrep) != 1 || is.na(nrep) || nrep <= 0) {
     stop("nrep must be a positive integer.")
   }
@@ -124,6 +131,8 @@ mediation_analysis <- function(data,
   if (!is.logical(replace.outcome) || length(replace.outcome) != 1L || is.na(replace.outcome)) {
     stop("replace.outcome must be TRUE or FALSE.")
   }
+
+  output.format <- match.arg(output.format)
 
   validate_data(data)
   validate_columns(columns)
@@ -232,6 +241,7 @@ mediation_analysis <- function(data,
     mediator_family = mediator.family,
     outcome_family = outcome.family,
     replace_outcome = isTRUE(replace.outcome),
+    output_format = output.format,
     chunk_size = chunk_size
   )
 
