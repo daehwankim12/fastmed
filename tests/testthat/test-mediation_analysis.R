@@ -144,7 +144,7 @@ test_that("asymptotic method errors when n <= p", {
   )
 })
 
-test_that("asymptotic method errors on singular design matrix", {
+test_that("singular design matrix yields NA output row", {
   set.seed(123)
   test_data_singular <- data.table::data.table(
     EXP1 = rep(0, 20),
@@ -163,8 +163,13 @@ test_that("asymptotic method errors on singular design matrix", {
       num_threads = 1,
       pert = "asymptotic"
     ),
-    regexp = "Cholesky decomposition failed"
+    NA
   )
+
+  results <- data.table::fread(output_csv)
+  expect_equal(nrow(results), 1)
+  expect_equal(results$Combination, "EXP1_MED1_OUT1")
+  expect_true(is.na(results$ACME_Mean))
 })
 
 test_that("p-values use mediate sign test", {

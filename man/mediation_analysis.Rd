@@ -40,7 +40,7 @@ reproducible across thread counts within the same build/runtime
 environment.}
 
 \item{chunk_size}{Maximum number of (exposure, mediator, outcome) combinations
-to process per call into the C++ backend. For large analyses, smaller
+to buffer per chunk inside the C++ backend. For large analyses, smaller
 values reduce peak memory usage. Default is 10000.}
 
 \item{mediator.family}{Model family for the mediator regression. One of

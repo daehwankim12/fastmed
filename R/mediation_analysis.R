@@ -19,8 +19,8 @@
 #'   reproducible across thread counts within the same build/runtime
 #'   environment.
 #' @param chunk_size Maximum number of (exposure, mediator, outcome) combinations
-#'   to process per call into the C++ backend. For large analyses, smaller
-#'   values reduce peak memory usage. Default is 10000.
+#'   to buffer per chunk inside the C++ backend. Smaller values reduce peak
+#'   memory usage for very large analyses. Default is 10000.
 #' @param mediator.family Model family for the mediator regression. One of
 #'   `"auto"`, `"gaussian"`, `"binomial"`, `"poisson"`. Default is `"auto"`.
 #' @param outcome.family Model family for the outcome regression. One of
@@ -182,81 +182,58 @@ mediation_analysis <- function(data,
   if (!is.finite(total_combinations) || total_combinations < 1) {
     stop("No (exposure, mediator, outcome) combinations to process.")
   }
-  if (total_combinations > .Machine$integer.max) {
-    stop("Too many combinations for chunking in R (exceeds .Machine$integer.max). Reduce the number of columns.")
+
+  validate_response_family <- function(y, family_name) {
+    eps <- 1e-8
+
+    if (family_name == "binomial") {
+      if (any(!is.finite(y))) stop("Binomial y contains non-finite")
+      ok <- all(abs(y) <= eps | abs(y - 1) <= eps)
+      if (!ok) stop("Binomial requires y in {0,1} (found non-binary).")
+      return(invisible(TRUE))
+    }
+
+    if (family_name == "poisson") {
+      if (any(!is.finite(y))) stop("Poisson y contains non-finite")
+      if (any(y < -eps)) stop("Poisson requires y >= 0.")
+      ok <- all(abs(y - round(y)) <= eps)
+      if (!ok) stop("Poisson requires integer y.")
+      return(invisible(TRUE))
+    }
+
+    invisible(TRUE)
   }
-  total_combinations <- as.integer(total_combinations)
 
-  if (total_combinations <= chunk_size) {
-    combinations <- expand.grid(
-      exposure = exposure_cols,
-      mediator = mediator_cols,
-      outcome = outcome_cols,
-      stringsAsFactors = FALSE
-    )
-    combinations$global_idx <- seq_len(nrow(combinations)) - 1L
-
-    mediation_analysis_cpp(
-      data_mat,
-      colnames(data_mat),
-      combinations,
-      nrep,
-      output_file,
-      pert,
-      base_seed,
-      append = FALSE,
-      mediator_family = mediator.family,
-      outcome_family = outcome.family,
-      replace_outcome = isTRUE(replace.outcome)
-    )
-  } else {
-    processed <- 0L
-    first_chunk <- TRUE
-
-    message(sprintf("Processing %d combinations in chunks of %d", total_combinations, chunk_size))
-
-    e <- n_exposure
-    m <- n_mediator
-    em <- e * m
-
-    while (processed < total_combinations) {
-      n_chunk <- min(chunk_size, total_combinations - processed)
-      idx <- processed + seq_len(n_chunk) - 1L
-
-      exposure_idx <- (idx %% e) + 1L
-      mediator_idx <- ((idx %/% e) %% m) + 1L
-      outcome_idx <- (idx %/% em) + 1L
-
-      combinations <- data.frame(
-        exposure = exposure_cols[exposure_idx],
-        mediator = mediator_cols[mediator_idx],
-        outcome = outcome_cols[outcome_idx],
-        global_idx = idx,
-        stringsAsFactors = FALSE
-      )
-
-      mediation_analysis_cpp(
-        data_mat,
-        colnames(data_mat),
-        combinations,
-        nrep,
-        output_file,
-        pert,
-        base_seed,
-        append = !first_chunk,
-        mediator_family = mediator.family,
-        outcome_family = outcome.family,
-        replace_outcome = isTRUE(replace.outcome)
-      )
-
-      first_chunk <- FALSE
-      processed <- processed + n_chunk
-
-      if (interactive() && processed %% (10L * chunk_size) == 0L) {
-        message(sprintf("Progress: %d/%d (%.1f%%)", processed, total_combinations, 100 * processed / total_combinations))
-      }
+  if (mediator.family %in% c("binomial", "poisson")) {
+    for (col in mediator_cols) {
+      validate_response_family(data[[col]], mediator.family)
     }
   }
+  if (outcome.family %in% c("binomial", "poisson")) {
+    for (col in outcome_cols) {
+      validate_response_family(data[[col]], outcome.family)
+    }
+  }
+
+  exp_idx <- match(exposure_cols, colnames(data_mat)) - 1L
+  med_idx <- match(mediator_cols, colnames(data_mat)) - 1L
+  out_idx <- match(outcome_cols, colnames(data_mat)) - 1L
+
+  mediation_analysis_cpp(
+    data = data_mat,
+    column_names = colnames(data_mat),
+    exposure_col_idx = exp_idx,
+    mediator_col_idx = med_idx,
+    outcome_col_idx = out_idx,
+    nrep = nrep,
+    output_file = output_file,
+    pert = pert,
+    base_seed = base_seed,
+    mediator_family = mediator.family,
+    outcome_family = outcome.family,
+    replace_outcome = isTRUE(replace.outcome),
+    chunk_size = chunk_size
+  )
 
   cat("Mediation analysis completed. Results saved to", output_file, "\n")
 }
