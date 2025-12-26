@@ -482,3 +482,146 @@ test_that("append mode creates valid CSV with a single header", {
   header_count <- sum(grepl("^Combination,", lines))
   expect_equal(header_count, 1)
 })
+
+test_that("asymptotic sigma matches lm residual SE", {
+  set.seed(123)
+  n <- 60
+  x <- rnorm(n)
+  m <- 0.5 + 2 * x + rnorm(n, sd = 0.3)
+  y <- -1 + 3 * m + 0.7 * x + rnorm(n, sd = 0.4)
+
+  sigmas <- fastmed:::fastmed_test_ols_sigmas_cpp(x, m, y)
+
+  expect_equal(sigmas$df_med, n - 2)
+  expect_equal(sigmas$df_out, n - 3)
+
+  sigma_med_r <- sigma(stats::lm(m ~ x))
+  sigma_out_r <- sigma(stats::lm(y ~ m + x))
+
+  expect_equal(sigmas$sigma_med, sigma_med_r, tolerance = 1e-10)
+  expect_equal(sigmas$sigma_out, sigma_out_r, tolerance = 1e-10)
+})
+
+test_that("p-value deterministic fixtures match definition", {
+  p0 <- fastmed:::fastmed_test_p_value_cpp(numeric(0))
+  expect_equal(p0, 1.0)
+
+  n <- 100
+  p_all_pos <- fastmed:::fastmed_test_p_value_cpp(rep(1, n))
+  expect_equal(p_all_pos, 2 / (n + 2), tolerance = 1e-12)
+
+  p_balanced <- fastmed:::fastmed_test_p_value_cpp(c(rep(-1, n / 2), rep(1, n / 2)))
+  expect_equal(p_balanced, 1.0)
+
+  p_zeros_split <- fastmed:::fastmed_test_p_value_cpp(c(0, 0, 0, 1))
+  expect_equal(p_zeros_split, 5 / 6, tolerance = 1e-12)
+})
+
+test_that("statistics summary matches R reference implementation", {
+  percentile_ref <- function(samples, perc) {
+    n <- length(samples)
+    if (n == 0) stop("empty samples")
+    k <- floor((n - 1) * perc / 100) + 1L
+    sort(samples)[k]
+  }
+
+  p_value_ref <- function(samples) {
+    n <- length(samples)
+    if (n == 0) return(1.0)
+
+    pos <- sum(samples > 0)
+    neg <- sum(samples < 0)
+    zero <- n - pos - neg
+
+    pos_eff <- pos + 0.5 * zero
+    prop <- (pos_eff + 1) / (n + 2)
+    2 * min(prop, 1 - prop)
+  }
+
+  samples <- c(seq(-2, 2, length.out = 101), 0, 0, 0)
+  stats_cpp <- fastmed:::fastmed_test_calculate_statistics_cpp(samples)
+
+  expect_equal(stats_cpp$mean, mean(samples), tolerance = 1e-12)
+  expect_equal(stats_cpp$percentile_2_5, percentile_ref(samples, 2.5), tolerance = 1e-12)
+  expect_equal(stats_cpp$percentile_97_5, percentile_ref(samples, 97.5), tolerance = 1e-12)
+  expect_equal(stats_cpp$p_value, p_value_ref(samples), tolerance = 1e-12)
+})
+
+test_that("p-value/CI consistency holds on symmetric fixtures (scoped)", {
+  stats_pos <- fastmed:::fastmed_test_calculate_statistics_cpp(rep(c(0.9, 1.1), 50))
+  ci_excludes_zero_pos <- stats_pos$percentile_2_5 > 0 || stats_pos$percentile_97_5 < 0
+  expect_equal(stats_pos$p_value < 0.05, ci_excludes_zero_pos)
+
+  stats_zero <- fastmed:::fastmed_test_calculate_statistics_cpp(rep(c(-1, 1), 50))
+  ci_excludes_zero_zero <- stats_zero$percentile_2_5 > 0 || stats_zero$percentile_97_5 < 0
+  expect_equal(stats_zero$p_value < 0.05, ci_excludes_zero_zero)
+})
+
+test_that("bootstrap retries advance RNG state (no reseed on retry)", {
+  n <- 50
+  draws <- fastmed:::fastmed_test_two_bootstrap_samples(
+    n = n,
+    base_seed = 123,
+    global_combination_idx = 0,
+    rep_idx = 0
+  )
+
+  expect_equal(dim(draws), c(n, 2))
+  expect_true(all(draws >= 0))
+  expect_true(all(draws < n))
+  expect_false(all(draws[, 1] == draws[, 2]))
+
+  draws2 <- fastmed:::fastmed_test_two_bootstrap_samples(
+    n = n,
+    base_seed = 123,
+    global_combination_idx = 0,
+    rep_idx = 0
+  )
+  expect_equal(draws, draws2)
+})
+
+test_that("output schema and row ordering are deterministic", {
+  set.seed(123)
+  test_data <- data.table::data.table(
+    EXP2 = rnorm(50),
+    EXP1 = rnorm(50),
+    MEDB = rnorm(50),
+    MEDA = rnorm(50),
+    OUT2 = rnorm(50),
+    OUT1 = rnorm(50)
+  )
+
+  output_csv <- withr::local_tempfile(fileext = ".csv")
+
+  mediation_analysis(
+    data = test_data,
+    columns = list(exposure = c("EXP"), mediator = c("MED"), outcome = c("OUT")),
+    nrep = 10,
+    output_file = output_csv,
+    num_threads = 4,
+    seed = 1
+  )
+
+  results <- data.table::fread(output_csv)
+  expect_equal(nrow(results), 8)
+
+  expected_names <- c(
+    "Combination",
+    "ACME_Mean", "ACME_2.5%", "ACME_97.5%", "ACME_p-value",
+    "ADE_Mean", "ADE_2.5%", "ADE_97.5%", "ADE_p-value",
+    "Total_Effect_Mean", "Total_Effect_2.5%", "Total_Effect_97.5%", "Total_Effect_p-value"
+  )
+  expect_equal(names(results), expected_names)
+
+  expected_order <- c(
+    "EXP2_MEDB_OUT2",
+    "EXP1_MEDB_OUT2",
+    "EXP2_MEDA_OUT2",
+    "EXP1_MEDA_OUT2",
+    "EXP2_MEDB_OUT1",
+    "EXP1_MEDB_OUT1",
+    "EXP2_MEDA_OUT1",
+    "EXP1_MEDA_OUT1"
+  )
+  expect_equal(results$Combination, expected_order)
+})

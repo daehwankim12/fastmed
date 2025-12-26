@@ -28,9 +28,62 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// fastmed_test_p_value_cpp
+double fastmed_test_p_value_cpp(NumericVector samples);
+RcppExport SEXP _fastmed_fastmed_test_p_value_cpp(SEXP samplesSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type samples(samplesSEXP);
+    rcpp_result_gen = Rcpp::wrap(fastmed_test_p_value_cpp(samples));
+    return rcpp_result_gen;
+END_RCPP
+}
+// fastmed_test_calculate_statistics_cpp
+List fastmed_test_calculate_statistics_cpp(NumericVector samples);
+RcppExport SEXP _fastmed_fastmed_test_calculate_statistics_cpp(SEXP samplesSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type samples(samplesSEXP);
+    rcpp_result_gen = Rcpp::wrap(fastmed_test_calculate_statistics_cpp(samples));
+    return rcpp_result_gen;
+END_RCPP
+}
+// fastmed_test_two_bootstrap_samples
+IntegerMatrix fastmed_test_two_bootstrap_samples(int n, uint64_t base_seed, uint64_t global_combination_idx, uint64_t rep_idx);
+RcppExport SEXP _fastmed_fastmed_test_two_bootstrap_samples(SEXP nSEXP, SEXP base_seedSEXP, SEXP global_combination_idxSEXP, SEXP rep_idxSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type n(nSEXP);
+    Rcpp::traits::input_parameter< uint64_t >::type base_seed(base_seedSEXP);
+    Rcpp::traits::input_parameter< uint64_t >::type global_combination_idx(global_combination_idxSEXP);
+    Rcpp::traits::input_parameter< uint64_t >::type rep_idx(rep_idxSEXP);
+    rcpp_result_gen = Rcpp::wrap(fastmed_test_two_bootstrap_samples(n, base_seed, global_combination_idx, rep_idx));
+    return rcpp_result_gen;
+END_RCPP
+}
+// fastmed_test_ols_sigmas_cpp
+List fastmed_test_ols_sigmas_cpp(NumericVector exposure, NumericVector mediator, NumericVector outcome);
+RcppExport SEXP _fastmed_fastmed_test_ols_sigmas_cpp(SEXP exposureSEXP, SEXP mediatorSEXP, SEXP outcomeSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type exposure(exposureSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type mediator(mediatorSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type outcome(outcomeSEXP);
+    rcpp_result_gen = Rcpp::wrap(fastmed_test_ols_sigmas_cpp(exposure, mediator, outcome));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_fastmed_mediation_analysis_cpp", (DL_FUNC) &_fastmed_mediation_analysis_cpp, 8},
+    {"_fastmed_fastmed_test_p_value_cpp", (DL_FUNC) &_fastmed_fastmed_test_p_value_cpp, 1},
+    {"_fastmed_fastmed_test_calculate_statistics_cpp", (DL_FUNC) &_fastmed_fastmed_test_calculate_statistics_cpp, 1},
+    {"_fastmed_fastmed_test_two_bootstrap_samples", (DL_FUNC) &_fastmed_fastmed_test_two_bootstrap_samples, 4},
+    {"_fastmed_fastmed_test_ols_sigmas_cpp", (DL_FUNC) &_fastmed_fastmed_test_ols_sigmas_cpp, 3},
     {NULL, NULL, 0}
 };
 

@@ -5,3 +5,19 @@ mediation_analysis_cpp <- function(data, column_names, combinations, nrep, outpu
     invisible(.Call(`_fastmed_mediation_analysis_cpp`, data, column_names, combinations, nrep, output_file, pert, base_seed, append))
 }
 
+fastmed_test_p_value_cpp <- function(samples) {
+    .Call(`_fastmed_fastmed_test_p_value_cpp`, samples)
+}
+
+fastmed_test_calculate_statistics_cpp <- function(samples) {
+    .Call(`_fastmed_fastmed_test_calculate_statistics_cpp`, samples)
+}
+
+fastmed_test_two_bootstrap_samples <- function(n, base_seed, global_combination_idx, rep_idx) {
+    .Call(`_fastmed_fastmed_test_two_bootstrap_samples`, n, base_seed, global_combination_idx, rep_idx)
+}
+
+fastmed_test_ols_sigmas_cpp <- function(exposure, mediator, outcome) {
+    .Call(`_fastmed_fastmed_test_ols_sigmas_cpp`, exposure, mediator, outcome)
+}
+
