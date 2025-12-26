@@ -65,7 +65,8 @@ mediation_analysis(
   columns = columns,
   nrep = 500,            # Number of bootstrap replicates
   output_file = output_csv,
-  num_threads = 4        # Number of threads for parallel processing
+  num_threads = 4,       # Number of threads for parallel processing
+  seed = 42              # Optional: reproducible results
 )
 
 # View results
@@ -80,6 +81,9 @@ print(results)
 - `nrep`: (Optional) Number of bootstrap replicates. Default is 1000.
 - `output_file`: Path to the output CSV file where results will be saved.
 - `num_threads`: (Optional) Number of threads for parallel processing. Defaults to the number of available cores.
+- `pert`: (Optional) Uncertainty method, one of `"asymptotic"` or `"bootstrap"`. Default is `"asymptotic"`.
+- `seed`: (Optional) Non-negative integer seed for reproducible results across thread counts (within the same build/runtime environment).
+- `chunk_size`: (Optional) Maximum number of combinations to process per C++ call; smaller values reduce peak memory usage for very large analyses.
 
 ### Output
 
@@ -94,10 +98,14 @@ The output CSV file will contain detailed results for each combination of exposu
 - Continuity correction: `prop = (pos_eff + 1) / (n + 2)`
 - Two-sided p-value: `p = 2 * min(prop, 1 - prop)`
 
+### Reproducibility
+
+For schedule-independent reproducibility across different `num_threads` values, pass an explicit `seed`. Output row order is deterministic and follows the generated `(exposure, mediator, outcome)` combination order.
+
 ## Performance Considerations
 
 - The package is optimized for parallel processing. Increase `num_threads` to utilize more CPU cores.
-- For very large datasets, consider splitting the analysis into smaller chunks and combining the results.
+- For very large analyses, use `chunk_size` to limit peak memory usage while writing results incrementally.
 - Monitor memory usage, especially when increasing `nrep` for bootstrap resampling.
 
 ## Troubleshooting

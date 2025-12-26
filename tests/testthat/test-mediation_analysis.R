@@ -198,3 +198,287 @@ test_that("p-values use sign test with continuity correction", {
   expect_gte(p_value, 2 / (nrep + 2))
   expect_lte(p_value, 0.2)
 })
+
+test_that("NA data is rejected with clear error", {
+  test_data <- data.table::data.table(
+    EXP1 = c(rnorm(49), NA_real_),
+    MED1 = rnorm(50),
+    OUT1 = rnorm(50)
+  )
+
+  output_csv <- withr::local_tempfile(fileext = ".csv")
+
+  expect_error(
+    mediation_analysis(
+      data = test_data,
+      columns = list(exposure = c("EXP"), mediator = c("MED"), outcome = c("OUT")),
+      nrep = 10,
+      output_file = output_csv,
+      num_threads = 1
+    ),
+    regexp = "missing values"
+  )
+})
+
+test_that("seed parameter produces reproducible results", {
+  set.seed(123)
+  test_data <- data.table::data.table(
+    EXP1 = rnorm(80),
+    MED1 = rnorm(80),
+    OUT1 = rnorm(80)
+  )
+
+  output_csv1 <- withr::local_tempfile(fileext = ".csv")
+  output_csv2 <- withr::local_tempfile(fileext = ".csv")
+
+  mediation_analysis(
+    data = test_data,
+    columns = list(exposure = c("EXP"), mediator = c("MED"), outcome = c("OUT")),
+    nrep = 30,
+    output_file = output_csv1,
+    num_threads = 1,
+    seed = 42
+  )
+
+  mediation_analysis(
+    data = test_data,
+    columns = list(exposure = c("EXP"), mediator = c("MED"), outcome = c("OUT")),
+    nrep = 30,
+    output_file = output_csv2,
+    num_threads = 1,
+    seed = 42
+  )
+
+  results1 <- data.table::fread(output_csv1)
+  results2 <- data.table::fread(output_csv2)
+
+  numeric_cols <- names(results1)[vapply(results1, is.numeric, logical(1))]
+  for (col in numeric_cols) {
+    expect_equal(results1[[col]], results2[[col]], tolerance = 1e-10)
+  }
+  expect_equal(results1$Combination, results2$Combination)
+})
+
+test_that("results identical across thread counts with same seed", {
+  set.seed(123)
+  test_data <- data.table::data.table(
+    EXP1 = rnorm(80),
+    EXP2 = rnorm(80),
+    MED1 = rnorm(80),
+    OUT1 = rnorm(80)
+  )
+
+  output_csv1 <- withr::local_tempfile(fileext = ".csv")
+  output_csv2 <- withr::local_tempfile(fileext = ".csv")
+
+  mediation_analysis(
+    data = test_data,
+    columns = list(exposure = c("EXP"), mediator = c("MED"), outcome = c("OUT")),
+    nrep = 30,
+    output_file = output_csv1,
+    num_threads = 1,
+    seed = 7
+  )
+
+  mediation_analysis(
+    data = test_data,
+    columns = list(exposure = c("EXP"), mediator = c("MED"), outcome = c("OUT")),
+    nrep = 30,
+    output_file = output_csv2,
+    num_threads = 4,
+    seed = 7
+  )
+
+  results1 <- data.table::fread(output_csv1)
+  results2 <- data.table::fread(output_csv2)
+
+  numeric_cols <- names(results1)[vapply(results1, is.numeric, logical(1))]
+  for (col in numeric_cols) {
+    expect_equal(results1[[col]], results2[[col]], tolerance = 1e-10)
+  }
+  expect_equal(results1$Combination, results2$Combination)
+})
+
+test_that("CSV escaping handles special characters in Combination", {
+  set.seed(123)
+  test_data <- data.table::data.table(
+    `EXP,1` = rnorm(50),
+    MED1 = rnorm(50),
+    OUT1 = rnorm(50)
+  )
+
+  output_csv <- withr::local_tempfile(fileext = ".csv")
+
+  mediation_analysis(
+    data = test_data,
+    columns = list(exposure = c("EXP"), mediator = c("MED"), outcome = c("OUT")),
+    nrep = 10,
+    output_file = output_csv,
+    num_threads = 1
+  )
+
+  results <- data.table::fread(output_csv)
+  expect_true("Combination" %in% names(results))
+  expect_equal(nrow(results), 1)
+})
+
+test_that("non-numeric columns are rejected", {
+  test_data <- data.table::data.table(
+    EXP1 = rnorm(50),
+    MED1 = rnorm(50),
+    OUT1 = rnorm(50),
+    Category = sample(c("A", "B"), 50, replace = TRUE)
+  )
+
+  output_csv <- withr::local_tempfile(fileext = ".csv")
+
+  expect_error(
+    mediation_analysis(
+      data = test_data,
+      columns = list(exposure = c("EXP"), mediator = c("MED"), outcome = c("OUT")),
+      nrep = 10,
+      output_file = output_csv,
+      num_threads = 1
+    ),
+    regexp = "Non-numeric columns"
+  )
+})
+
+test_that("missing column type is rejected", {
+  test_data <- data.table::data.table(
+    EXP1 = rnorm(50),
+    MED1 = rnorm(50),
+    OUT1 = rnorm(50)
+  )
+
+  output_csv <- withr::local_tempfile(fileext = ".csv")
+
+  expect_error(
+    mediation_analysis(
+      data = test_data,
+      columns = list(exposure = c("EXP"), mediator = c("MED")),
+      nrep = 10,
+      output_file = output_csv,
+      num_threads = 1
+    ),
+    regexp = "3 elements"
+  )
+})
+
+test_that("no matching columns rejected with clear error", {
+  test_data <- data.table::data.table(
+    EXP1 = rnorm(50),
+    MED1 = rnorm(50),
+    OUT1 = rnorm(50)
+  )
+
+  output_csv <- withr::local_tempfile(fileext = ".csv")
+
+  expect_error(
+    mediation_analysis(
+      data = test_data,
+      columns = list(exposure = c("WRONG"), mediator = c("MED"), outcome = c("OUT")),
+      nrep = 10,
+      output_file = output_csv,
+      num_threads = 1
+    ),
+    regexp = "No columns found matching exposure prefixes"
+  )
+})
+
+test_that("startsWith prefix matching works", {
+  set.seed(123)
+  test_data <- data.table::data.table(
+    Exposure_A1 = rnorm(50),
+    Exposure_A2 = rnorm(50),
+    ExposureBad = rnorm(50),
+    Mediator_X1 = rnorm(50),
+    Outcome_Y1 = rnorm(50)
+  )
+
+  output_csv <- withr::local_tempfile(fileext = ".csv")
+
+  mediation_analysis(
+    data = test_data,
+    columns = list(exposure = c("Exposure_A"), mediator = c("Mediator_X"), outcome = c("Outcome_Y")),
+    nrep = 10,
+    output_file = output_csv,
+    num_threads = 1
+  )
+
+  results <- data.table::fread(output_csv)
+  expect_equal(nrow(results), 2)
+})
+
+test_that("chunked analysis matches non-chunked (same seed)", {
+  set.seed(123)
+  test_data <- data.table::data.table(
+    EXP1 = rnorm(60),
+    EXP2 = rnorm(60),
+    MED1 = rnorm(60),
+    MED2 = rnorm(60),
+    OUT1 = rnorm(60),
+    OUT2 = rnorm(60)
+  )
+
+  output_csv1 <- withr::local_tempfile(fileext = ".csv")
+  output_csv2 <- withr::local_tempfile(fileext = ".csv")
+
+  mediation_analysis(
+    data = test_data,
+    columns = list(exposure = c("EXP"), mediator = c("MED"), outcome = c("OUT")),
+    nrep = 20,
+    output_file = output_csv1,
+    num_threads = 2,
+    seed = 99,
+    chunk_size = 100
+  )
+
+  mediation_analysis(
+    data = test_data,
+    columns = list(exposure = c("EXP"), mediator = c("MED"), outcome = c("OUT")),
+    nrep = 20,
+    output_file = output_csv2,
+    num_threads = 2,
+    seed = 99,
+    chunk_size = 2
+  )
+
+  results1 <- data.table::fread(output_csv1)
+  results2 <- data.table::fread(output_csv2)
+
+  numeric_cols <- names(results1)[vapply(results1, is.numeric, logical(1))]
+  for (col in numeric_cols) {
+    expect_equal(results1[[col]], results2[[col]], tolerance = 1e-10)
+  }
+  expect_equal(results1$Combination, results2$Combination)
+})
+
+test_that("append mode creates valid CSV with a single header", {
+  set.seed(123)
+  test_data <- data.table::data.table(
+    EXP1 = rnorm(50),
+    EXP2 = rnorm(50),
+    EXP3 = rnorm(50),
+    MED1 = rnorm(50),
+    OUT1 = rnorm(50)
+  )
+
+  output_csv <- withr::local_tempfile(fileext = ".csv")
+
+  mediation_analysis(
+    data = test_data,
+    columns = list(exposure = c("EXP"), mediator = c("MED"), outcome = c("OUT")),
+    nrep = 10,
+    output_file = output_csv,
+    num_threads = 2,
+    chunk_size = 1
+  )
+
+  results <- data.table::fread(output_csv)
+  expect_equal(nrow(results), 3)
+
+  lines <- readLines(output_csv)
+  header_count <- sum(grepl("^Combination,", lines))
+  expect_equal(header_count, 1)
+})

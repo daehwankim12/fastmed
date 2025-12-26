@@ -4,9 +4,11 @@
 #include <RcppParallel.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <locale>
 #include <memory>
 #include <mutex>
 #include <numeric>
@@ -42,19 +44,6 @@ double mean_cpp(const std::vector<double>& data) {
     return std::accumulate(data.begin(), data.end(), 0.0) / data.size();
 }
 
-double std_dev_cpp(const std::vector<double>& data) {
-    if (data.size() < 2) {
-        throw std::runtime_error(
-                "Cannot calculate standard deviation with fewer than 2 elements");
-    }
-    
-    double m = mean_cpp(data);
-    double accum = std::accumulate(
-        data.begin(), data.end(), 0.0,
-        [m](double sum, double val) { return sum + (val - m) * (val - m); });
-    return std::sqrt(accum / (data.size() - 1));
-}
-
 double percentile_cpp(const std::vector<double>& data, double perc) {
     if (data.empty()) {
         throw std::runtime_error("Cannot calculate percentile of empty vector");
@@ -87,6 +76,40 @@ double p_value_cpp(const std::vector<double>& samples) {
     double pos_eff = static_cast<double>(pos) + 0.5 * static_cast<double>(zero);
     double prop = (pos_eff + 1.0) / (static_cast<double>(n) + 2.0);
     return 2.0 * std::min(prop, 1.0 - prop);
+}
+
+uint64_t derive_seed(uint64_t base_seed,
+                     uint64_t global_combination_idx,
+                     uint64_t rep_idx) {
+    uint64_t x =
+        base_seed ^ (global_combination_idx << 32) ^ rep_idx;
+    x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    x = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
+    return x ^ (x >> 31);
+}
+
+std::string csv_escape(const std::string& field) {
+    bool needs_escape = false;
+    for (char c : field) {
+        if (c == ',' || c == '"' || c == '\n' || c == '\r') {
+            needs_escape = true;
+            break;
+        }
+    }
+    if (!needs_escape) {
+        return field;
+    }
+
+    std::string escaped = "\"";
+    for (char c : field) {
+        if (c == '"') {
+            escaped += "\"\"";
+        } else {
+            escaped += c;
+        }
+    }
+    escaped += "\"";
+    return escaped;
 }
 
 MatrixXd cholesky_lower_or_throw(MatrixXd cov, const std::string& context) {
@@ -177,56 +200,69 @@ struct BootstrapResult {
 class MediationWorker : public Worker {
 private:
     const MatrixXd& data;
-    const std::vector<std::string>& column_names;
+    const std::unordered_map<std::string, int>& column_index_map;
     const int nrep;
     const std::vector<std::string>& exposure_vec;
     const std::vector<std::string>& mediator_vec;
     const std::vector<std::string>& outcome_vec;
-    
-    std::unordered_map<std::string, int> column_index_map;
+    const std::vector<uint64_t>& global_indices;
     std::string pert_method;
-    std::shared_ptr<BufferedFileWriter> writer;
+    const uint64_t base_seed;
+    const size_t chunk_begin;
+    std::vector<std::string>& output_lines;
+    std::exception_ptr* error;
+    std::mutex* error_mutex;
     
 public:
     MediationWorker(const MatrixXd& data_,
-                    const std::vector<std::string>& column_names_, int nrep_,
+                    const std::unordered_map<std::string, int>& column_index_map_,
+                    int nrep_,
                     const std::vector<std::string>& exposure_vec_,
                     const std::vector<std::string>& mediator_vec_,
                     const std::vector<std::string>& outcome_vec_,
+                    const std::vector<uint64_t>& global_indices_,
                     const std::string& pert_method_,
-                    std::shared_ptr<BufferedFileWriter> writer_)
+                    uint64_t base_seed_,
+                    size_t chunk_begin_,
+                    std::vector<std::string>& output_lines_,
+                    std::exception_ptr* error_,
+                    std::mutex* error_mutex_)
         : data(data_),
-          column_names(column_names_),
+          column_index_map(column_index_map_),
           nrep(nrep_),
           exposure_vec(exposure_vec_),
           mediator_vec(mediator_vec_),
           outcome_vec(outcome_vec_),
+          global_indices(global_indices_),
           pert_method(pert_method_),
-          writer(writer_) {
-        for (size_t c = 0; c < column_names.size(); ++c) {
-            column_index_map[column_names[c]] = c;
-        }
-    }
+          base_seed(base_seed_),
+          chunk_begin(chunk_begin_),
+          output_lines(output_lines_),
+          error(error_),
+          error_mutex(error_mutex_) {}
     
     void operator()(std::size_t begin, std::size_t end) {
-        try {
-            std::mt19937 gen(std::random_device{}());
-            std::uniform_int_distribution<> dis(0, data.rows() - 1);
-            
-            for (std::size_t idx = begin; idx < end; ++idx) {
-                if (idx >= exposure_vec.size()) break;
-                
-                std::string result = process_combination(idx, gen, dis);
-                writer->write(result);
+        for (std::size_t idx = begin; idx < end; ++idx) {
+            if (idx >= exposure_vec.size()) {
+                break;
             }
-        } catch (const std::exception& e) {
-            Rcpp::stop(std::string("Error in worker: ") + e.what());
+
+            try {
+                output_lines[idx - chunk_begin] = process_combination(idx);
+            } catch (...) {
+                std::lock_guard<std::mutex> lock(*error_mutex);
+                if (!*error) {
+                    *error = std::current_exception();
+                }
+                break;
+            }
         }
     }
     
 private:
-    std::string process_combination(std::size_t idx, std::mt19937& gen,
-                                    std::uniform_int_distribution<>& dis) {
+    std::string process_combination(std::size_t idx) {
+        uint64_t global_combination_idx = global_indices.at(idx);
+
         std::string exposure_col = exposure_vec[idx];
         std::string mediator_col = mediator_vec[idx];
         std::string outcome_col = outcome_vec[idx];
@@ -255,10 +291,12 @@ private:
         
         if (pert_method == "asymptotic") {
             bootstrap_results = perform_bootstrap_asymptotic(
-                X_med, X_out, beta_med, beta_out, mediator, outcome, gen);
+                X_med, X_out, beta_med, beta_out, mediator, outcome,
+                global_combination_idx);
         } else if (pert_method == "bootstrap") {
             bootstrap_results = perform_bootstrap_resample(exposure, mediator,
-                                                           outcome, gen, dis);
+                                                           outcome,
+                                                           global_combination_idx);
         } else {
             throw std::invalid_argument("Unknown perturbation method: " +
                                         pert_method);
@@ -279,7 +317,7 @@ private:
     std::vector<BootstrapResult> perform_bootstrap_asymptotic(
             const MatrixXd& X_med, const MatrixXd& X_out, const VectorXd& beta_med,
             const VectorXd& beta_out, const VectorXd& mediator,
-            const VectorXd& outcome, std::mt19937& gen) {
+            const VectorXd& outcome, uint64_t global_combination_idx) {
         std::vector<BootstrapResult> results;
         results.reserve(nrep);
         
@@ -318,9 +356,11 @@ private:
             sigma_out * L_XTX_out.triangularView<Lower>().solve(
                             MatrixXd::Identity(p_out, p_out));
         
-        std::normal_distribution<> dist(0.0, 1.0);
-        
-        for (int rep = 0; rep < nrep; ++rep) {
+        for (int rep_idx = 0; rep_idx < nrep; ++rep_idx) {
+            std::mt19937_64 gen(
+                derive_seed(base_seed, global_combination_idx, rep_idx));
+            std::normal_distribution<double> dist(0.0, 1.0);
+
             VectorXd beta_med_boot =
                 beta_med + L_med *
                 VectorXd::NullaryExpr(beta_med.size(), [&]() {
@@ -358,20 +398,55 @@ private:
     
     std::vector<BootstrapResult> perform_bootstrap_resample(
             const VectorXd& exposure, const VectorXd& mediator,
-            const VectorXd& outcome, std::mt19937& gen,
-            std::uniform_int_distribution<>& dis) {
+            const VectorXd& outcome, uint64_t global_combination_idx) {
         std::vector<BootstrapResult> results;
         results.reserve(nrep);
         
-        auto X_med_boot = std::make_unique<MatrixXd>(exposure.size(), 2);
-        auto X_out_boot = std::make_unique<MatrixXd>(exposure.size(), 3);
-        
-        for (int rep = 0; rep < nrep; ++rep) {
-            VectorXd boot_exposure(exposure.size());
-            VectorXd boot_mediator(mediator.size());
-            VectorXd boot_outcome(outcome.size());
+        const int n = static_cast<int>(exposure.size());
+        const int MAX_ATTEMPTS = 3 * nrep;
+        int rep_idx = 0;
+        int total_attempts = 0;
+        std::string last_exception_msg;
+
+        if (n <= 0) {
+            throw std::runtime_error("Data contains zero rows");
+        }
+
+        auto X_med_boot = std::make_unique<MatrixXd>(n, 2);
+        auto X_out_boot = std::make_unique<MatrixXd>(n, 3);
+
+        std::uniform_int_distribution<int> dis(0, n - 1);
+
+        while (rep_idx < nrep) {
+            if (total_attempts >= MAX_ATTEMPTS) {
+                std::ostringstream oss;
+                oss << "Bootstrap failed: " << (total_attempts - rep_idx)
+                    << " failures, " << rep_idx << " successes after "
+                    << MAX_ATTEMPTS << " attempts. Last error: "
+                    << last_exception_msg;
+                throw std::runtime_error(oss.str());
+            }
+
+            std::mt19937_64 gen(
+                derive_seed(base_seed, global_combination_idx, rep_idx));
+
+            bool success = false;
+            while (!success) {
+                if (total_attempts >= MAX_ATTEMPTS) {
+                    std::ostringstream oss;
+                    oss << "Bootstrap failed: " << (total_attempts - rep_idx)
+                        << " failures, " << rep_idx << " successes after "
+                        << MAX_ATTEMPTS << " attempts. Last error: "
+                        << last_exception_msg;
+                    throw std::runtime_error(oss.str());
+                }
+                ++total_attempts;
+
+            VectorXd boot_exposure(n);
+            VectorXd boot_mediator(n);
+            VectorXd boot_outcome(n);
             
-            for (int m = 0; m < exposure.size(); ++m) {
+            for (int m = 0; m < n; ++m) {
                 int sample_idx = dis(gen);
                 boot_exposure[m] = exposure[sample_idx];
                 boot_mediator[m] = mediator[sample_idx];
@@ -410,13 +485,12 @@ private:
                     y11 - y10,  // direct_effect_1
                     y11 - y00   // total_effect
                 });
+                success = true;
+                ++rep_idx;
             } catch (const std::exception& e) {
-                Rcpp::warning(
-                    "Linear regression failed: %s Skipping this bootstrap "
-                    "replicate.",
-                    e.what());
-                --rep;
+                last_exception_msg = e.what();
             }
+        }
         }
         
         return results;
@@ -445,8 +519,9 @@ private:
         auto total_stats = calculate_statistics(total_samples);
         
         std::stringstream result_stream;
+        result_stream.imbue(std::locale::classic());
         result_stream << std::fixed << std::setprecision(6);
-        result_stream << combination << ",";
+        result_stream << csv_escape(combination) << ",";
         write_statistics(result_stream, acme_stats);
         result_stream << ",";
         write_statistics(result_stream, ade_stats);
@@ -468,7 +543,9 @@ private:
 void mediation_analysis_cpp(NumericMatrix data, CharacterVector column_names,
                             DataFrame combinations, int nrep,
                             std::string output_file,
-                            std::string pert = "asymptotic") {
+                            std::string pert = "asymptotic",
+                            uint64_t base_seed = 0,
+                            bool append = false) {
     try {
         if (data.nrow() == 0 || data.ncol() == 0) {
             throw std::invalid_argument("Data matrix is empty");
@@ -500,23 +577,99 @@ void mediation_analysis_cpp(NumericMatrix data, CharacterVector column_names,
             as<std::vector<std::string>>(combinations["mediator"]);
         std::vector<std::string> outcome_vec_cpp =
             as<std::vector<std::string>>(combinations["outcome"]);
+
+        std::vector<uint64_t> global_indices;
+        global_indices.reserve(combinations.nrows());
+        if (combinations.containsElementNamed("global_idx")) {
+            SEXP global_idx_col = combinations["global_idx"];
+            if (TYPEOF(global_idx_col) == INTSXP) {
+                IntegerVector idx = combinations["global_idx"];
+                for (int v : idx) {
+                    if (v == NA_INTEGER) {
+                        throw std::invalid_argument("global_idx contains NA");
+                    }
+                    if (v < 0) {
+                        throw std::invalid_argument(
+                            "global_idx must be non-negative");
+                    }
+                    global_indices.push_back(static_cast<uint64_t>(v));
+                }
+            } else {
+                NumericVector idx = combinations["global_idx"];
+                for (double v : idx) {
+                    if (NumericVector::is_na(v)) {
+                        throw std::invalid_argument("global_idx contains NA");
+                    }
+                    if (v < 0.0) {
+                        throw std::invalid_argument(
+                            "global_idx must be non-negative");
+                    }
+                    double iv;
+                    if (std::modf(v, &iv) != 0.0) {
+                        throw std::invalid_argument(
+                            "global_idx must contain integers");
+                    }
+                    global_indices.push_back(static_cast<uint64_t>(iv));
+                }
+            }
+        } else {
+            global_indices.resize(combinations.nrows());
+            std::iota(global_indices.begin(), global_indices.end(), 0);
+        }
+
+        std::unordered_map<std::string, int> column_index_map;
+        column_index_map.reserve(column_names_cpp.size());
+        for (size_t c = 0; c < column_names_cpp.size(); ++c) {
+            column_index_map[column_names_cpp[c]] = static_cast<int>(c);
+        }
         
-        auto writer = std::make_shared<BufferedFileWriter>(output_file, 100);
+        std::ofstream output_stream;
+        if (append) {
+            output_stream.open(output_file, std::ios::out | std::ios::app);
+        } else {
+            output_stream.open(output_file, std::ios::out | std::ios::trunc);
+        }
+        if (!output_stream.is_open()) {
+            throw std::runtime_error("Failed to open output file: " + output_file);
+        }
         
-        std::string header =
-            "Combination,ACME_Mean,ACME_2.5%,ACME_97.5%,ACME_p-value,"
-            "ADE_Mean,ADE_2.5%,ADE_97.5%,ADE_p-value,"
-            "Total_Effect_Mean,Total_Effect_2.5%,Total_Effect_97.5%,Total_"
-            "Effect_p-value\n";
-        writer->write(header);
+        if (!append) {
+            std::string header =
+                "Combination,ACME_Mean,ACME_2.5%,ACME_97.5%,ACME_p-value,"
+                "ADE_Mean,ADE_2.5%,ADE_97.5%,ADE_p-value,"
+                "Total_Effect_Mean,Total_Effect_2.5%,Total_Effect_97.5%,Total_"
+                "Effect_p-value\n";
+            output_stream << header;
+        }
         
-        MediationWorker worker(data_eigen, column_names_cpp, nrep,
-                               exposure_vec_cpp, mediator_vec_cpp,
-                               outcome_vec_cpp, pert, writer);
-        
-        RcppParallel::parallelFor(0, combinations.nrows(), worker);
-        
-        writer->flush();
+        const size_t num_combinations = combinations.nrows();
+        const size_t chunk_size = 1024;
+
+        for (size_t chunk_begin = 0; chunk_begin < num_combinations;
+             chunk_begin += chunk_size) {
+            size_t chunk_end = std::min(chunk_begin + chunk_size, num_combinations);
+            std::vector<std::string> chunk_results(chunk_end - chunk_begin);
+
+            std::exception_ptr error = nullptr;
+            std::mutex error_mutex;
+
+            MediationWorker worker(data_eigen, column_index_map, nrep,
+                                   exposure_vec_cpp, mediator_vec_cpp,
+                                   outcome_vec_cpp, global_indices, pert,
+                                   base_seed, chunk_begin, chunk_results,
+                                   &error, &error_mutex);
+
+            RcppParallel::parallelFor(chunk_begin, chunk_end, worker);
+
+            if (error) {
+                std::rethrow_exception(error);
+            }
+
+            for (const auto& line : chunk_results) {
+                output_stream << line;
+            }
+        }
+        output_stream.flush();
         
     } catch (const std::exception& e) {
         Rcpp::stop("Error in mediation_analysis_cpp: %s", e.what());

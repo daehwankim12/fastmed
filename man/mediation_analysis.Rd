@@ -10,7 +10,9 @@ mediation_analysis(
   nrep = 1000,
   output_file,
   num_threads = parallel::detectCores(),
-  pert = "asymptotic"
+  pert = "asymptotic",
+  seed = NULL,
+  chunk_size = 10000
 )
 }
 \arguments{
@@ -24,23 +26,35 @@ mediation_analysis(
 
 \item{num_threads}{An integer specifying the number of threads to use for parallel processing.  Default is the number of available cores detected by `parallel::detectCores()`.}
 
-\item{pert}{A character string specifying the method to use for calculating standard errors and confidence intervals.  Options are `"asymptotic"` and `"bootstrap"`.  The `"bootstrap"` method is more computationally intensive but may provide more accurate results for small sample sizes. If your data is non-parametric, the `"bootstrap"` method is recommended. Default is `"asymptotic"`.}
+\item{pert}{A character string specifying the method to use for uncertainty
+estimation. Options are `"asymptotic"` and `"bootstrap"`. Default is
+`"asymptotic"`.}
+
+\item{seed}{Optional non-negative integer. If provided, results are
+reproducible across thread counts within the same build/runtime
+environment.}
+
+\item{chunk_size}{Maximum number of (exposure, mediator, outcome) combinations
+to process per call into the C++ backend. For large analyses, smaller
+values reduce peak memory usage. Default is 10000.}
 }
 \value{
 None.  The results are written to the specified `output_file` in CSV format.
 }
 \description{
-This function performs mediation analysis using bootstrap resampling to estimate direct, indirect, and total effects.  It processes data in chunks to handle large datasets efficiently and writes results directly to a CSV file.
+This function performs mediation analysis using multiple linear regressions
+and either an asymptotic (normal) perturbation or bootstrap resampling to
+estimate direct, indirect, and total effects. Results are written to a CSV
+file.
 }
 \details{
 This function estimates the following effects:
-* **Indirect Effect (t1):**  The effect of the exposure on the outcome through the mediator when the exposure is set to its value at t=1 (typically meaning its presence or a higher level).
-* **Indirect Effect (t0):** The effect of the exposure on the outcome through the mediator when the exposure is set to its value at t=0 (typically meaning its absence or a lower level).
-* **Direct Effect (t1):** The effect of the exposure on the outcome not through the mediator when the exposure is set to t=1.
-* **Direct Effect (t0):** The effect of the exposure on the outcome not through the mediator when the exposure is set to t=0.
+* **ACME(0):** Average causal mediation (indirect) effect at baseline treatment.
+* **ADE(0):** Average direct effect at baseline treatment.
 * **Total Effect:**  The total effect of the exposure on the outcome, both direct and indirect.
 
-The output CSV file includes estimates, standard errors, 95% confidence intervals (LCB, UCB), and p-values for each effect and combination of variables.
+The output CSV file includes mean estimates, 95% percentile confidence
+intervals, and p-values for each effect and combination of variables.
 }
 \examples{
 \dontrun{
