@@ -35,3 +35,11 @@ vignettes/*.pdf
 *.utf8.md
 *.knit.md
 inst/doc
+.serena
+.idea
+src/*.o
+src/*.so
+.Rlib
+renv
+.renv_root
+

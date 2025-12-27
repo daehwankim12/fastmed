@@ -1,0 +1,104 @@
+---
+title: "Comparing fastmed with mediation::mediate()"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Comparing fastmed with mediation::mediate()}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+## Overview
+
+`fastmed` aims to reproduce the estimands and summary definitions used by
+`mediation::mediate()` (ACME/ADE/total effect, percentile confidence intervals,
+and the sign-test p-value), while providing a fast C++ backend for batch runs.
+
+This vignette documents the expected sources of differences and provides a
+minimal workflow for comparisons.
+
+## Known Differences
+
+1. **Randomness / simulation draws**
+
+   Even with the same seed, `fastmed` and `mediation` use different RNG
+   implementations and may schedule work differently (threads), so individual
+   simulation draws will not match.
+
+2. **Percentile confidence intervals**
+
+   `fastmed` uses R's default quantile definition (`type = 7`) when computing
+   the 2.5% and 97.5% percentiles from simulation or bootstrap draws. This
+   matches the default used by `mediation`.
+
+3. **P-value definition**
+
+   `fastmed` uses the same sign-test-style definition as `mediation`:
+   if the simulated estimate is exactly 0, the p-value is 1; otherwise it is
+   `2 * min(#(sims > 0), #(sims < 0)) / N` (capped at 1).
+
+4. **GLM fitting**
+
+   `fastmed` fits GLMs using its own IRLS/QR implementation. Small numerical
+   differences from `stats::glm()` are expected (tolerances on the order of
+   `1e-4` to `1e-6`, depending on the family and data).
+
+5. **Treat/control values**
+
+   The C++ backend currently defines effects as contrasts between `T = 0` and
+   `T = 1`. For binary treatments coded {0,1}, this matches the common
+   `control.value = 0`, `treat.value = 1` convention in `mediation`.
+
+6. **Optional `replace.outcome`**
+
+   `fastmed` optionally replaces simulated outcomes with observed outcomes for
+   `Y(0, M(0))` among observed controls and `Y(1, M(1))` among observed treated.
+   This can improve stability in some settings, but it will generally reduce
+   agreement with `mediation::mediate()`.
+
+## Minimal Comparison Workflow
+
+The `mediation` package is used here as a reference. This code is provided as a
+template and is not executed when building the vignette.
+
+```{r, eval=FALSE}
+library(data.table)
+library(fastmed)
+
+if (requireNamespace("mediation", quietly = TRUE)) {
+  set.seed(42)
+  n <- 250
+  T <- rbinom(n, 1, 0.5)
+  M <- 1 + 0.5 * T + rnorm(n)
+  Y <- 2 + 0.3 * M + 0.4 * T + rnorm(n)
+  df <- data.frame(T = T, M = M, Y = Y)
+
+  # mediation::mediate()
+  med_model <- lm(M ~ T, data = df)
+  out_model <- lm(Y ~ M + T, data = df)
+  med_res <- mediation::mediate(
+    med_model, out_model,
+    treat = "T", mediator = "M",
+    sims = 400, boot = FALSE,
+    treat.value = 1, control.value = 0
+  )
+
+  # fastmed (writes CSV)
+  out_csv <- tempfile(fileext = ".csv")
+  mediation_analysis(
+    data = df,
+    columns = list(exposure = "T", mediator = "M", outcome = "Y"),
+    nrep = 400,
+    pert = "asymptotic",
+    seed = 42,
+    num_threads = 1,
+    mediator.family = "gaussian",
+    outcome.family = "gaussian",
+    output.format = "mediate",
+    output_file = out_csv
+  )
+
+  fast_res <- fread(out_csv)
+  list(mediation = med_res, fastmed = fast_res)
+}
+```
+

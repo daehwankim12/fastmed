@@ -10,7 +10,17 @@ mediation_analysis(
   nrep = 1000,
   output_file,
   num_threads = parallel::detectCores(),
-  pert = "asymptotic"
+  pert = "asymptotic",
+  seed = NULL,
+  chunk_size = 10000,
+  grain_size = 100,
+  mediator.family = "auto",
+  outcome.family = "auto",
+  replace.outcome = FALSE,
+  output.format = c("mediate", "legacy"),
+  weights = NULL,
+  treat.value = 1,
+  control.value = 0
 )
 }
 \arguments{
@@ -18,29 +28,81 @@ mediation_analysis(
 
 \item{columns}{A list with three named elements: `exposure`, `mediator`, and `outcome`. Each element should be a character vector containing the prefixes of the column names for the corresponding variables. For example, if your exposure variables are named "Exposure_1", "Exposure_2", etc., the `exposure` element should be `"Exposure"`.}
 
-\item{nrep}{An integer specifying the number of bootstrap replicates to perform.  Higher values generally lead to more stable estimates but increase computation time. Default is 1000.}
+\item{nrep}{An integer specifying the number of simulation draws (asymptotic)
+or bootstrap replicates (bootstrap). Higher values generally lead to more
+stable estimates but increase computation time. Default is 1000.}
 
 \item{output_file}{A character string specifying the path to the output CSV file.  Results are written to this file in real-time.  The file will be overwritten if it already exists.}
 
 \item{num_threads}{An integer specifying the number of threads to use for parallel processing.  Default is the number of available cores detected by `parallel::detectCores()`.}
 
-\item{pert}{A character string specifying the method to use for calculating standard errors and confidence intervals.  Options are `"asymptotic"` and `"bootstrap"`.  The `"bootstrap"` method is more computationally intensive but may provide more accurate results for small sample sizes. If your data is non-parametric, the `"bootstrap"` method is recommended. Default is `"asymptotic"`.}
+\item{pert}{A character string specifying the method to use for uncertainty
+estimation. Options are `"asymptotic"` and `"bootstrap"`. Default is
+`"asymptotic"`.}
+
+\item{seed}{Optional non-negative integer. If provided, results are
+reproducible across thread counts within the same build/runtime
+environment.}
+
+\item{chunk_size}{Maximum number of (exposure, mediator, outcome) combinations
+to buffer per chunk inside the C++ backend. For large analyses, smaller
+values reduce peak memory usage. Default is 10000.}
+
+\item{grain_size}{Number of (exposure, mediator, outcome) combinations to
+process per parallel task inside the C++ backend. Larger values reduce
+scheduling overhead when individual combinations are cheap. Default is 100.}
+
+\item{mediator.family}{Model family for the mediator regression. One of
+`"auto"`, `"gaussian"`, `"binomial"`, `"poisson"`. Default is `"auto"`.}
+
+\item{outcome.family}{Model family for the outcome regression. One of
+`"auto"`, `"gaussian"`, `"binomial"`, `"poisson"`. Default is `"auto"`.}
+
+\item{replace.outcome}{Logical; if TRUE, replace the simulated `Y(0,M(0))`
+for observed controls and `Y(1,M(1))` for observed treated units with the
+observed outcome. Default is FALSE.}
+
+\item{output.format}{Output CSV schema. `"mediate"` writes mediate-style
+effect columns (`d0`, `d1`, `z0`, `z1`, `tau`). `"legacy"` writes the
+previous schema (`ACME_*`, `ADE_*`, `Total_Effect_*`). Default is
+`"mediate"`.}
+
+\item{weights}{Optional numeric vector of prior weights (length `nrow(data)`). Non-negative, finite, and must sum to a positive value. Default is `NULL` (unweighted).}
+
+\item{treat.value}{Numeric scalar giving the treatment value for `T=1` potential outcomes. Default is 1.}
+
+\item{control.value}{Numeric scalar giving the control value for `T=0` potential outcomes. Default is 0.}
 }
 \value{
 None.  The results are written to the specified `output_file` in CSV format.
 }
 \description{
-This function performs mediation analysis using bootstrap resampling to estimate direct, indirect, and total effects.  It processes data in chunks to handle large datasets efficiently and writes results directly to a CSV file.
+This function performs mediation analysis using generalized linear models
+(Gaussian/Binomial/Poisson) and either an asymptotic (quasi-Bayesian)
+perturbation or bootstrap resampling to estimate direct, indirect, and total
+effects. Results are written to a CSV file.
 }
 \details{
 This function estimates the following effects:
-* **Indirect Effect (t1):**  The effect of the exposure on the outcome through the mediator when the exposure is set to its value at t=1 (typically meaning its presence or a higher level).
-* **Indirect Effect (t0):** The effect of the exposure on the outcome through the mediator when the exposure is set to its value at t=0 (typically meaning its absence or a lower level).
-* **Direct Effect (t1):** The effect of the exposure on the outcome not through the mediator when the exposure is set to t=1.
-* **Direct Effect (t0):** The effect of the exposure on the outcome not through the mediator when the exposure is set to t=0.
-* **Total Effect:**  The total effect of the exposure on the outcome, both direct and indirect.
+* **d0:** ACME(control) average causal mediation effect.
+* **d1:** ACME(treated) average causal mediation effect.
+* **z0:** ADE(control) average direct effect.
+* **z1:** ADE(treated) average direct effect.
+* **tau:** Total effect.
 
-The output CSV file includes estimates, standard errors, 95% confidence intervals (LCB, UCB), and p-values for each effect and combination of variables.
+The output CSV file includes mean estimates, 95% percentile confidence
+intervals, and p-values for each effect and combination of variables.
+
+The default output schema (`output.format = "mediate"`) is:
+\preformatted{Combination,d0_estimate,d0_ci_lower,d0_ci_upper,d0_p,d1_estimate,d1_ci_lower,d1_ci_upper,d1_p,z0_estimate,z0_ci_lower,z0_ci_upper,z0_p,z1_estimate,z1_ci_lower,z1_ci_upper,z1_p,tau_estimate,tau_ci_lower,tau_ci_upper,tau_p}
+
+Family auto-detection is based on the response values:
+* All values in `{0,1}` -> Binomial
+* All values are non-negative integers -> Poisson
+* Otherwise -> Gaussian
+
+Setting `replace.outcome = TRUE` replaces some simulated outcomes with
+observed outcomes and may reduce agreement with `mediation::mediate()`.
 }
 \examples{
 \dontrun{

@@ -1,0 +1,79 @@
+---
+title: "fastmed Performance Notes"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{fastmed Performance Notes}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+## Overview
+
+`fastmed` is designed for large batch mediation analyses with many
+exposure/mediator/outcome combinations. After correctness is verified (see the
+`comparison` vignette), the main performance levers are:
+
+1. **Model fitting** (GLM IRLS)
+2. **Simulation / bootstrap loops**
+3. **Parallel scheduling overhead**
+4. **CSV formatting and I/O**
+
+## Implemented Optimizations
+
+### Allocation-free IRLS
+
+The GLM fitter uses IRLS with a QR-based weighted least-squares solve. For small
+design matrices (`p = 2` for the mediator model, `p = 3` for the outcome model),
+performance is dominated by repeated allocations if we rebuild subset matrices
+each iteration.
+
+The current implementation:
+
+- Builds working response/weights for all rows.
+- Uses a full `n × p` weighted matrix with zero weights for invalid rows.
+- Reuses preallocated work buffers across IRLS iterations.
+
+### Streaming simulation
+
+Simulation of mediator draws and outcome evaluation happens in a single pass
+over `i = 1..n`, avoiding storage of intermediate mediator vectors.
+
+### Gaussian outcome fast path (identity link)
+
+When the outcome family is Gaussian with identity link and `replace.outcome` is
+disabled, scenario means depend only on `mean(M0)` and `mean(M1)`:
+
+- `mean(Y00) = b0 + b1 * mean(M0) + b2 * 0`
+- `mean(Y01) = b0 + b1 * mean(M1) + b2 * 0`
+- `mean(Y10) = b0 + b1 * mean(M0) + b2 * 1`
+- `mean(Y11) = b0 + b1 * mean(M1) + b2 * 1`
+
+This avoids computing four outcomes per unit per simulation draw.
+
+### Faster CSV formatting
+
+CSV rows are built using `std::to_chars()` (fixed, 6 decimals) rather than
+`std::stringstream`, reducing per-row formatting overhead.
+
+## Tuning Parameters
+
+Two parameters often matter for throughput:
+
+- `chunk_size`: limits the number of combinations buffered at once in C++.
+- `grain_size`: controls the number of combinations per parallel task
+  (`RcppParallel::parallelFor` grain size). Larger values reduce scheduling
+  overhead when each combination is cheap.
+
+## Benchmarking
+
+The repository includes a simple benchmark script:
+
+```r
+# From repo root (after installation)
+Rscript --vanilla benchmarks/benchmark.R
+
+# Run a single profile session
+Rscript --vanilla benchmarks/benchmark.R --profile
+```
+
+The script reports elapsed time and (approximate) RSS before/after the run.
