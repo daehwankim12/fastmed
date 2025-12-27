@@ -141,6 +141,148 @@ test_that("fastmed roughly matches mediation::mediate() for Gaussian/Gaussian (b
   expect_equal(fast$tau_estimate, med_result$tau.coef, tolerance = tol_from(med_result$tau.se, med_result$tau.ci))
 })
 
+test_that("fastmed roughly matches mediation::mediate() for Gaussian/Gaussian with non-0/1 treatment values", {
+  skip_if_not_installed("mediation")
+
+  set.seed(321)
+  n <- 250
+  T <- sample(c(-1, 1), n, replace = TRUE)
+  M <- 1 + 0.5 * T + stats::rnorm(n)
+  Y <- 2 + 0.3 * M + 0.4 * T + stats::rnorm(n)
+  data <- data.frame(T = T, M = M, Y = Y)
+
+  sims <- 400
+
+  med_model <- stats::lm(M ~ T, data = data)
+  out_model <- stats::lm(Y ~ M + T, data = data)
+  mediate_args <- list(
+    model.m = med_model,
+    model.y = out_model,
+    treat = "T",
+    mediator = "M",
+    sims = sims,
+    boot = FALSE,
+    treat.value = 1,
+    control.value = -1
+  )
+  med_result <- do.call(mediation::mediate, mediate_args)
+
+  output_csv <- withr::local_tempfile(fileext = ".csv")
+  mediation_analysis(
+    data = data,
+    columns = list(exposure = "T", mediator = "M", outcome = "Y"),
+    nrep = sims,
+    output_file = output_csv,
+    num_threads = 1,
+    pert = "asymptotic",
+    seed = 321,
+    mediator.family = "gaussian",
+    outcome.family = "gaussian",
+    treat.value = 1,
+    control.value = -1
+  )
+  fast <- data.table::fread(output_csv)
+  expect_equal(nrow(fast), 1)
+
+  z975 <- stats::qnorm(0.975)
+  se_or_ci <- function(se, ci) {
+    if (is.numeric(se) && length(se) == 1L && is.finite(se) && se >= 0) {
+      return(se)
+    }
+    if (is.numeric(ci) && length(ci) == 2L && all(is.finite(ci))) {
+      return((ci[2] - ci[1]) / (2 * z975))
+    }
+    NA_real_
+  }
+
+  tol_from <- function(se, ci, extra = 0.05, mult = 3) {
+    se_val <- se_or_ci(se, ci)
+    if (!is.finite(se_val)) {
+      return(0.5)
+    }
+    mult * se_val + extra
+  }
+
+  expect_equal(fast$d0_estimate, med_result$d0, tolerance = tol_from(med_result$d0.se, med_result$d0.ci))
+  expect_equal(fast$d1_estimate, med_result$d1, tolerance = tol_from(med_result$d1.se, med_result$d1.ci))
+  expect_equal(fast$z0_estimate, med_result$z0, tolerance = tol_from(med_result$z0.se, med_result$z0.ci))
+  expect_equal(fast$z1_estimate, med_result$z1, tolerance = tol_from(med_result$z1.se, med_result$z1.ci))
+  expect_equal(fast$tau_estimate, med_result$tau.coef, tolerance = tol_from(med_result$tau.se, med_result$tau.ci))
+})
+
+test_that("fastmed roughly matches mediation::mediate() for Gaussian/Gaussian with weights (bootstrap)", {
+  skip_if_not_installed("mediation")
+
+  data <- generate_mediation_data(
+    n = 250,
+    treat_family = "binary",
+    mediator_family = "gaussian",
+    outcome_family = "gaussian",
+    true_acme = 0.3,
+    true_ade = 0.4,
+    seed = 111
+  )
+
+  set.seed(111)
+  w <- stats::runif(nrow(data), min = 0, max = 3)
+  w <- w / mean(w)
+
+  sims <- 200
+
+  med_model <- stats::lm(M ~ T, data = data, weights = w)
+  out_model <- stats::lm(Y ~ M + T, data = data, weights = w)
+  mediate_args <- list(
+    model.m = med_model,
+    model.y = out_model,
+    treat = "T",
+    mediator = "M",
+    sims = sims,
+    boot = TRUE
+  )
+  mediate_formals <- names(formals(mediation::mediate))
+  if ("treat.value" %in% mediate_formals) mediate_args$treat.value <- 1
+  if ("control.value" %in% mediate_formals) mediate_args$control.value <- 0
+  med_result <- do.call(mediation::mediate, mediate_args)
+
+  output_csv <- withr::local_tempfile(fileext = ".csv")
+  mediation_analysis(
+    data = data,
+    columns = list(exposure = "T", mediator = "M", outcome = "Y"),
+    nrep = sims,
+    output_file = output_csv,
+    num_threads = 1,
+    pert = "bootstrap",
+    seed = 111,
+    mediator.family = "gaussian",
+    outcome.family = "gaussian",
+    weights = w
+  )
+  fast <- data.table::fread(output_csv)
+  expect_equal(nrow(fast), 1)
+
+  z975 <- stats::qnorm(0.975)
+  se_or_ci <- function(se, ci) {
+    if (is.numeric(se) && length(se) == 1L && is.finite(se) && se >= 0) {
+      return(se)
+    }
+    if (is.numeric(ci) && length(ci) == 2L && all(is.finite(ci))) {
+      return((ci[2] - ci[1]) / (2 * z975))
+    }
+    NA_real_
+  }
+
+  tol_from <- function(se, ci, extra = 0.1, mult = 4) {
+    se_val <- se_or_ci(se, ci)
+    if (!is.finite(se_val)) {
+      return(0.75)
+    }
+    mult * se_val + extra
+  }
+
+  expect_equal(fast$d0_estimate, med_result$d0, tolerance = tol_from(med_result$d0.se, med_result$d0.ci))
+  expect_equal(fast$tau_estimate, med_result$tau.coef, tolerance = tol_from(med_result$tau.se, med_result$tau.ci))
+})
+
 test_that("fastmed completes across all family combinations (smoke)", {
   combos <- expand.grid(
     mediator_family = c("gaussian", "binomial", "poisson"),

@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <random>
 #include <sstream>
 #include <stdexcept>
@@ -15,9 +16,6 @@ using Eigen::MatrixXd;
 using Eigen::VectorXd;
 
 namespace {
-constexpr double X0 = 0.0;
-constexpr double X1 = 1.0;
-
 MatrixXd cholesky_lower_or_throw(MatrixXd cov, const std::string& context) {
     cov = 0.5 * (cov + cov.transpose());
     Eigen::LLT<MatrixXd> chol(cov);
@@ -33,6 +31,7 @@ MatrixXd cholesky_lower_or_throw(MatrixXd cov, const std::string& context) {
 }  // namespace
 
 MediationWorker::MediationWorker(const Eigen::Map<const MatrixXd>& data_,
+                                 const VectorXd& weights_,
                                  const std::vector<std::string>& column_names_,
                                  int nrep_,
                                  const std::vector<int>& exposure_col_idx_,
@@ -45,10 +44,13 @@ MediationWorker::MediationWorker(const Eigen::Map<const MatrixXd>& data_,
                                  const std::string& pert_method_,
                                  bool replace_outcome_,
                                  bool legacy_output_schema_,
+                                 double treat_value_,
+                                 double control_value_,
                                  uint64_t base_seed_,
                                  size_t chunk_begin_,
                                  std::vector<std::string>& output_lines_)
     : data(data_),
+      weights(weights_),
       column_names(column_names_),
       nrep(nrep_),
       exposure_col_idx(exposure_col_idx_),
@@ -61,13 +63,14 @@ MediationWorker::MediationWorker(const Eigen::Map<const MatrixXd>& data_,
       pert_method(pert_method_),
       replace_outcome(replace_outcome_),
       legacy_output_schema(legacy_output_schema_),
+      treat_value(treat_value_),
+      control_value(control_value_),
       base_seed(base_seed_),
       chunk_begin(chunk_begin_),
       output_lines(output_lines_) {}
 
 void MediationWorker::operator()(std::size_t begin, std::size_t end) {
     const int n = static_cast<int>(data.rows());
-    VectorXd prior_w = VectorXd::Ones(n);
     VectorXd off_m = VectorXd::Zero(n);
     VectorXd off_y = VectorXd::Zero(n);
 
@@ -79,7 +82,7 @@ void MediationWorker::operator()(std::size_t begin, std::size_t end) {
 
     for (std::size_t idx = begin; idx < end; ++idx) {
         output_lines[idx - chunk_begin] =
-            process_combination(idx, X_med, X_out, prior_w, off_m, off_y);
+            process_combination(idx, X_med, X_out, off_m, off_y);
     }
 }
 
@@ -102,7 +105,6 @@ std::string MediationWorker::format_na_row(const std::string& exposure_col,
 std::string MediationWorker::process_combination(std::size_t idx,
                                                  MatrixXd& X_med,
                                                  MatrixXd& X_out,
-                                                 VectorXd& prior_w,
                                                  VectorXd& off_m,
                                                  VectorXd& off_y) {
     const size_t e = exposure_col_idx.size();
@@ -145,19 +147,38 @@ std::string MediationWorker::process_combination(std::size_t idx,
         const double glm_qr_tol = 1e-12;
 
         GlmFit fit_m =
-            glm_fit_irls_qr(X_med, mediator, fam_m, prior_w, off_m, glm_maxit,
+            glm_fit_irls_qr(X_med, mediator, fam_m, weights, off_m, glm_maxit,
                             glm_epsilon, glm_qr_tol);
 
         GlmFit fit_y =
-            glm_fit_irls_qr(X_out, outcome, fam_y, prior_w, off_y, glm_maxit,
+            glm_fit_irls_qr(X_out, outcome, fam_y, weights, off_y, glm_maxit,
                             glm_epsilon, glm_qr_tol);
 
         std::vector<BootstrapResult> bootstrap_results;
+        BootstrapResult t0_result{};
+        const BootstrapResult* t0_ptr = nullptr;
         if (pert_method == "asymptotic") {
             bootstrap_results = perform_bootstrap_asymptotic(
                 fit_m, fit_y, fam_m, fam_y, n, global_combination_idx, exposure,
                 outcome, replace_outcome);
         } else if (pert_method == "bootstrap") {
+            std::mt19937_64 rng_t0(
+                derive_seed(base_seed,
+                            global_combination_idx,
+                            std::numeric_limits<uint64_t>::max()));
+            const double sigma2_m =
+                (fam_m == GlmFamily::Gaussian) ? fit_m.dispersion : 1.0;
+            t0_result = simulate_effect_draw(fit_m.coef,
+                                             fit_y.coef,
+                                             fam_m,
+                                             fam_y,
+                                             sigma2_m,
+                                             rng_t0,
+                                             exposure,
+                                             outcome,
+                                             weights,
+                                             replace_outcome);
+            t0_ptr = &t0_result;
             bootstrap_results = perform_bootstrap_resample(
                 exposure, mediator, outcome, fam_m, fam_y, n, global_combination_idx,
                 replace_outcome);
@@ -165,7 +186,11 @@ std::string MediationWorker::process_combination(std::size_t idx,
             throw std::invalid_argument("Unknown perturbation method: " + pert_method);
         }
 
-        return format_results(exposure_col, mediator_col, outcome_col, bootstrap_results);
+        return format_results(exposure_col,
+                              mediator_col,
+                              outcome_col,
+                              bootstrap_results,
+                              t0_ptr);
     } catch (...) {
         return format_na_row(exposure_col, mediator_col, outcome_col);
     }
@@ -213,6 +238,7 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_asymptotic(
                                                rng,
                                                exposure_obs,
                                                outcome_obs,
+                                               weights,
                                                replace_outcome_));
     }
 
@@ -248,13 +274,13 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_resample(
 
     std::uniform_int_distribution<int> dis(0, n - 1);
 
-    VectorXd prior_w = VectorXd::Ones(n);
     VectorXd off_m = VectorXd::Zero(n);
     VectorXd off_y = VectorXd::Zero(n);
 
     VectorXd boot_exposure(n);
     VectorXd boot_mediator(n);
     VectorXd boot_outcome(n);
+    VectorXd boot_weights(n);
 
     MatrixXd X_med_boot(n, 2);
     MatrixXd X_out_boot(n, 3);
@@ -286,6 +312,7 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_resample(
                 boot_exposure[j] = exposure[sample_idx];
                 boot_mediator[j] = mediator[sample_idx];
                 boot_outcome[j] = outcome[sample_idx];
+                boot_weights[j] = weights[sample_idx];
             }
 
             X_med_boot.col(0).setOnes();
@@ -301,10 +328,18 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_resample(
 
             try {
                 GlmFit fit_m_boot =
-                    glm_fit_irls_qr(X_med_boot, boot_mediator, fam_m, prior_w, off_m,
+                    glm_fit_irls_qr(X_med_boot,
+                                    boot_mediator,
+                                    fam_m,
+                                    boot_weights,
+                                    off_m,
                                     glm_maxit, glm_epsilon, glm_qr_tol);
                 GlmFit fit_y_boot =
-                    glm_fit_irls_qr(X_out_boot, boot_outcome, fam_y, prior_w, off_y,
+                    glm_fit_irls_qr(X_out_boot,
+                                    boot_outcome,
+                                    fam_y,
+                                    boot_weights,
+                                    off_y,
                                     glm_maxit, glm_epsilon, glm_qr_tol);
 
                 const double sigma2_m =
@@ -316,8 +351,9 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_resample(
                                                        fam_y,
                                                        sigma2_m,
                                                        rng,
-                                                       boot_exposure,
-                                                       boot_outcome,
+                                                       exposure,
+                                                       outcome,
+                                                       weights,
                                                        replace_outcome_));
                 success = true;
                 ++rep_idx;
@@ -339,34 +375,46 @@ BootstrapResult MediationWorker::simulate_effect_draw(
     std::mt19937_64& rng,
     const Eigen::Ref<const VectorXd>& exposure_obs,
     const Eigen::Ref<const VectorXd>& outcome_obs,
+    const Eigen::Ref<const VectorXd>& weights_obs,
     bool replace_outcome_) {
     const int n = static_cast<int>(exposure_obs.size());
     if (outcome_obs.size() != n) {
         throw std::runtime_error("simulate_effect_draw: observed size mismatch");
     }
+    if (weights_obs.size() != n) {
+        throw std::runtime_error("simulate_effect_draw: weights size mismatch");
+    }
+
+    const double weight_sum = weights_obs.sum();
+    if (!(weight_sum > 0.0) || !std::isfinite(weight_sum)) {
+        throw std::runtime_error("simulate_effect_draw: non-positive weight sum");
+    }
+
+    const double X0 = control_value;
+    const double X1 = treat_value;
 
     double eta_m0 = bm[0] + bm[1] * X0;
     double eta_m1 = bm[0] + bm[1] * X1;
 
     if (fam_y == GlmFamily::Gaussian && !replace_outcome_) {
-        double sum_M0 = 0.0;
-        double sum_M1 = 0.0;
+        double sum_wM0 = 0.0;
+        double sum_wM1 = 0.0;
 
         if (fam_m == GlmFamily::Gaussian) {
             double sd = std::sqrt(std::max(0.0, sigma2_m));
             std::normal_distribution<double> nd(0.0, sd);
             for (int i = 0; i < n; ++i) {
                 double e = nd(rng);
-                sum_M0 += eta_m0 + e;
-                sum_M1 += eta_m1 + e;
+                sum_wM0 += weights_obs[i] * (eta_m0 + e);
+                sum_wM1 += weights_obs[i] * (eta_m1 + e);
             }
         } else if (fam_m == GlmFamily::Binomial) {
             double p0 = inv_logit(eta_m0);
             double p1 = inv_logit(eta_m1);
             std::uniform_real_distribution<double> unif(0.0, 1.0);
             for (int i = 0; i < n; ++i) {
-                sum_M0 += (unif(rng) < p0) ? 1.0 : 0.0;
-                sum_M1 += (unif(rng) < p1) ? 1.0 : 0.0;
+                sum_wM0 += weights_obs[i] * ((unif(rng) < p0) ? 1.0 : 0.0);
+                sum_wM1 += weights_obs[i] * ((unif(rng) < p1) ? 1.0 : 0.0);
             }
         } else {  // Poisson
             double lam0 = safe_exp(eta_m0);
@@ -374,13 +422,13 @@ BootstrapResult MediationWorker::simulate_effect_draw(
             std::poisson_distribution<int> p0(lam0);
             std::poisson_distribution<int> p1(lam1);
             for (int i = 0; i < n; ++i) {
-                sum_M0 += static_cast<double>(p0(rng));
-                sum_M1 += static_cast<double>(p1(rng));
+                sum_wM0 += weights_obs[i] * static_cast<double>(p0(rng));
+                sum_wM1 += weights_obs[i] * static_cast<double>(p1(rng));
             }
         }
 
-        const double mean_M0 = sum_M0 / static_cast<double>(n);
-        const double mean_M1 = sum_M1 / static_cast<double>(n);
+        const double mean_M0 = sum_wM0 / weight_sum;
+        const double mean_M1 = sum_wM1 / weight_sum;
 
         const double mean_y00 = by[0] + by[1] * mean_M0 + by[2] * X0;
         const double mean_y01 = by[0] + by[1] * mean_M1 + by[2] * X0;
@@ -429,10 +477,11 @@ BootstrapResult MediationWorker::simulate_effect_draw(
                 }
             }
 
-            sum_y00 += y00;
-            sum_y01 += y01;
-            sum_y10 += y10;
-            sum_y11 += y11;
+            const double wi = weights_obs[i];
+            sum_y00 += wi * y00;
+            sum_y01 += wi * y01;
+            sum_y10 += wi * y10;
+            sum_y11 += wi * y11;
         }
     } else if (fam_m == GlmFamily::Binomial) {
         double p0 = inv_logit(eta_m0);
@@ -462,10 +511,11 @@ BootstrapResult MediationWorker::simulate_effect_draw(
                 }
             }
 
-            sum_y00 += y00;
-            sum_y01 += y01;
-            sum_y10 += y10;
-            sum_y11 += y11;
+            const double wi = weights_obs[i];
+            sum_y00 += wi * y00;
+            sum_y01 += wi * y01;
+            sum_y10 += wi * y10;
+            sum_y11 += wi * y11;
         }
     } else {  // Poisson
         double lam0 = safe_exp(eta_m0);
@@ -496,17 +546,18 @@ BootstrapResult MediationWorker::simulate_effect_draw(
                 }
             }
 
-            sum_y00 += y00;
-            sum_y01 += y01;
-            sum_y10 += y10;
-            sum_y11 += y11;
+            const double wi = weights_obs[i];
+            sum_y00 += wi * y00;
+            sum_y01 += wi * y01;
+            sum_y10 += wi * y10;
+            sum_y11 += wi * y11;
         }
     }
 
-    const double mean_y00 = sum_y00 / static_cast<double>(n);
-    const double mean_y01 = sum_y01 / static_cast<double>(n);
-    const double mean_y10 = sum_y10 / static_cast<double>(n);
-    const double mean_y11 = sum_y11 / static_cast<double>(n);
+    const double mean_y00 = sum_y00 / weight_sum;
+    const double mean_y01 = sum_y01 / weight_sum;
+    const double mean_y10 = sum_y10 / weight_sum;
+    const double mean_y11 = sum_y11 / weight_sum;
 
     const double d0 = mean_y01 - mean_y00;   // ACME(control)
     const double d1 = mean_y11 - mean_y10;   // ACME(treated)
@@ -521,7 +572,8 @@ std::string MediationWorker::format_results(
     const std::string& exposure_col,
     const std::string& mediator_col,
     const std::string& outcome_col,
-    const std::vector<BootstrapResult>& results) {
+    const std::vector<BootstrapResult>& results,
+    const BootstrapResult* t0) {
     std::string combination = exposure_col + "_" + mediator_col + "_" + outcome_col;
 
     std::vector<double> d0_samples, d1_samples, z0_samples, z1_samples, tau_samples;
@@ -539,11 +591,28 @@ std::string MediationWorker::format_results(
         tau_samples.push_back(result.total_effect);      // total effect
     }
 
-    auto d0_stats = calculate_statistics_inplace(d0_samples);
-    auto d1_stats = calculate_statistics_inplace(d1_samples);
-    auto z0_stats = calculate_statistics_inplace(z0_samples);
-    auto z1_stats = calculate_statistics_inplace(z1_samples);
-    auto tau_stats = calculate_statistics_inplace(tau_samples);
+    const bool has_t0 = (t0 != nullptr);
+
+    auto d0_stats = has_t0
+                        ? calculate_statistics_inplace_with_estimate(
+                              d0_samples, t0->indirect_effect_0)
+                        : calculate_statistics_inplace(d0_samples);
+    auto d1_stats = has_t0
+                        ? calculate_statistics_inplace_with_estimate(
+                              d1_samples, t0->indirect_effect_1)
+                        : calculate_statistics_inplace(d1_samples);
+    auto z0_stats = has_t0
+                        ? calculate_statistics_inplace_with_estimate(
+                              z0_samples, t0->direct_effect_0)
+                        : calculate_statistics_inplace(z0_samples);
+    auto z1_stats = has_t0
+                        ? calculate_statistics_inplace_with_estimate(
+                              z1_samples, t0->direct_effect_1)
+                        : calculate_statistics_inplace(z1_samples);
+    auto tau_stats =
+        has_t0 ? calculate_statistics_inplace_with_estimate(tau_samples,
+                                                           t0->total_effect)
+               : calculate_statistics_inplace(tau_samples);
 
     std::string result;
     result.reserve(combination.size() + 512);

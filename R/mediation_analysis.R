@@ -7,6 +7,9 @@
 #'
 #' @param data A `data.table` or `data.frame` containing the data.  If a `data.frame` is provided, it will be converted to a `data.table` internally.
 #' @param columns A list with three named elements: `exposure`, `mediator`, and `outcome`. Each element should be a character vector containing the prefixes of the column names for the corresponding variables. For example, if your exposure variables are named "Exposure_1", "Exposure_2", etc., the `exposure` element should be `"Exposure"`.
+#' @param weights Optional numeric vector of prior weights (length `nrow(data)`). Non-negative, finite, and must sum to a positive value. Default is `NULL` (unweighted).
+#' @param treat.value Numeric scalar giving the treatment value for `T=1` potential outcomes. Default is 1.
+#' @param control.value Numeric scalar giving the control value for `T=0` potential outcomes. Default is 0.
 #' @param nrep An integer specifying the number of simulation draws (asymptotic)
 #'   or bootstrap replicates (bootstrap). Higher values generally lead to more
 #'   stable estimates but increase computation time. Default is 1000.
@@ -93,7 +96,10 @@ mediation_analysis <- function(data,
                                mediator.family = "auto",
                                outcome.family = "auto",
                                replace.outcome = FALSE,
-                               output.format = c("mediate", "legacy")) {
+                               output.format = c("mediate", "legacy"),
+                               weights = NULL,
+                               treat.value = 1,
+                               control.value = 0) {
   if (!is.numeric(nrep) || length(nrep) != 1 || is.na(nrep) || nrep <= 0) {
     stop("nrep must be a positive integer.")
   }
@@ -145,6 +151,35 @@ mediation_analysis <- function(data,
 
   validate_data(data)
   validate_columns(columns)
+
+  if (!is.null(weights)) {
+    if (!is.numeric(weights) || is.matrix(weights) || length(weights) != nrow(data)) {
+      stop("weights must be a numeric vector of length nrow(data), or NULL.")
+    }
+    weights <- as.numeric(weights)
+    if (any(!is.finite(weights))) {
+      stop("weights must be finite (no NA/Inf).")
+    }
+    if (any(weights < 0)) {
+      stop("weights must be non-negative (zeros allowed).")
+    }
+    wsum <- sum(weights)
+    if (!is.finite(wsum) || wsum <= 0) {
+      stop("weights must sum to a positive finite value.")
+    }
+  }
+
+  if (!is.numeric(treat.value) || length(treat.value) != 1L || is.na(treat.value) || !is.finite(treat.value)) {
+    stop("treat.value must be a single, finite numeric value.")
+  }
+  if (!is.numeric(control.value) || length(control.value) != 1L || is.na(control.value) || !is.finite(control.value)) {
+    stop("control.value must be a single, finite numeric value.")
+  }
+  treat.value <- as.numeric(treat.value)
+  control.value <- as.numeric(control.value)
+  if (treat.value == control.value) {
+    stop("treat.value and control.value must be different.")
+  }
 
   if (data.table::is.data.table(data)) {
     data <- data.table::copy(data)
@@ -243,6 +278,7 @@ mediation_analysis <- function(data,
     exposure_col_idx = exp_idx,
     mediator_col_idx = med_idx,
     outcome_col_idx = out_idx,
+    weights = weights,
     nrep = nrep,
     output_file = output_file,
     pert = pert,
@@ -251,6 +287,8 @@ mediation_analysis <- function(data,
     outcome_family = outcome.family,
     replace_outcome = isTRUE(replace.outcome),
     output_format = output.format,
+    treat_value = treat.value,
+    control_value = control.value,
     chunk_size = chunk_size,
     grain_size = grain_size
   )

@@ -7,6 +7,7 @@
 #include "mediation_worker.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <limits>
@@ -30,12 +31,15 @@ void mediation_analysis_cpp(NumericMatrix data,
                             IntegerVector outcome_col_idx,
                             int nrep,
                             std::string output_file,
+                            Rcpp::Nullable<Rcpp::NumericVector> weights = R_NilValue,
                             std::string pert = "asymptotic",
                             uint64_t base_seed = 0,
                             std::string mediator_family = "auto",
                             std::string outcome_family = "auto",
                             bool replace_outcome = false,
                             std::string output_format = "mediate",
+                            double treat_value = 1.0,
+                            double control_value = 0.0,
                             int chunk_size = 1024,
                             int grain_size = 1) {
     try {
@@ -66,6 +70,13 @@ void mediation_analysis_cpp(NumericMatrix data,
             throw std::invalid_argument(
                 "Invalid perturbation method. Use 'asymptotic' or 'bootstrap'");
         }
+        if (!std::isfinite(treat_value) || !std::isfinite(control_value)) {
+            throw std::invalid_argument("treat_value and control_value must be finite");
+        }
+        if (treat_value == control_value) {
+            throw std::invalid_argument(
+                "treat_value and control_value must be different");
+        }
         if (chunk_size <= 0) {
             throw std::invalid_argument("chunk_size must be positive");
         }
@@ -75,6 +86,29 @@ void mediation_analysis_cpp(NumericMatrix data,
 
         std::vector<std::string> column_names_cpp =
             as<std::vector<std::string>>(column_names);
+
+        Eigen::VectorXd weights_cpp = Eigen::VectorXd::Ones(n);
+        if (weights.isNotNull()) {
+            Rcpp::NumericVector w(weights.get());
+            if (w.size() != n) {
+                throw std::invalid_argument("weights must have length nrow(data)");
+            }
+            double wsum = 0.0;
+            for (int i = 0; i < n; ++i) {
+                const double wi = w[i];
+                if (!std::isfinite(wi)) {
+                    throw std::invalid_argument("weights must be finite");
+                }
+                if (wi < 0.0) {
+                    throw std::invalid_argument("weights must be non-negative");
+                }
+                weights_cpp[i] = wi;
+                wsum += wi;
+            }
+            if (!(wsum > 0.0) || !std::isfinite(wsum)) {
+                throw std::invalid_argument("weights must sum to a positive finite value");
+            }
+        }
 
         std::vector<int> exposure_col_idx_cpp = as<std::vector<int>>(exposure_col_idx);
         std::vector<int> mediator_col_idx_cpp = as<std::vector<int>>(mediator_col_idx);
@@ -208,6 +242,7 @@ void mediation_analysis_cpp(NumericMatrix data,
             std::vector<std::string> chunk_results(chunk_end - chunk_begin);
 
             MediationWorker worker(data_map,
+                                   weights_cpp,
                                    column_names_cpp,
                                    nrep,
                                    exposure_col_idx_cpp,
@@ -220,6 +255,8 @@ void mediation_analysis_cpp(NumericMatrix data,
                                    pert,
                                    replace_outcome,
                                    legacy_output_schema,
+                                   treat_value,
+                                   control_value,
                                    base_seed,
                                    chunk_begin,
                                    chunk_results);
@@ -236,4 +273,3 @@ void mediation_analysis_cpp(NumericMatrix data,
         Rcpp::stop("Error in mediation_analysis_cpp: %s", e.what());
     }
 }
-

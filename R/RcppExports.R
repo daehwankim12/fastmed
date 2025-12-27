@@ -21,7 +21,6 @@ glm_fit_cpp <- function(X, y, family = "auto", weights = NULL, offset = NULL, ma
     .Call(`_fastmed_glm_fit_cpp`, X, y, family, weights, offset, maxit, epsilon, qr_tol)
 }
 
-mediation_analysis_cpp <- function(data, column_names, exposure_col_idx, mediator_col_idx, outcome_col_idx, nrep, output_file, pert = "asymptotic", base_seed = 0L, mediator_family = "auto", outcome_family = "auto", replace_outcome = FALSE, output_format = "mediate", chunk_size = 1024L, grain_size = 1L) {
-    invisible(.Call(`_fastmed_mediation_analysis_cpp`, data, column_names, exposure_col_idx, mediator_col_idx, outcome_col_idx, nrep, output_file, pert, base_seed, mediator_family, outcome_family, replace_outcome, output_format, chunk_size, grain_size))
+mediation_analysis_cpp <- function(data, column_names, exposure_col_idx, mediator_col_idx, outcome_col_idx, nrep, output_file, weights = NULL, pert = "asymptotic", base_seed = 0L, mediator_family = "auto", outcome_family = "auto", replace_outcome = FALSE, output_format = "mediate", treat_value = 1, control_value = 0, chunk_size = 1024L, grain_size = 1L) {
+    invisible(.Call(`_fastmed_mediation_analysis_cpp`, data, column_names, exposure_col_idx, mediator_col_idx, outcome_col_idx, nrep, output_file, weights, pert, base_seed, mediator_family, outcome_family, replace_outcome, output_format, treat_value, control_value, chunk_size, grain_size))
 }
-

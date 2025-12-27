@@ -79,8 +79,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // mediation_analysis_cpp
-void mediation_analysis_cpp(NumericMatrix data, CharacterVector column_names, IntegerVector exposure_col_idx, IntegerVector mediator_col_idx, IntegerVector outcome_col_idx, int nrep, std::string output_file, std::string pert, uint64_t base_seed, std::string mediator_family, std::string outcome_family, bool replace_outcome, std::string output_format, int chunk_size, int grain_size);
-RcppExport SEXP _fastmed_mediation_analysis_cpp(SEXP dataSEXP, SEXP column_namesSEXP, SEXP exposure_col_idxSEXP, SEXP mediator_col_idxSEXP, SEXP outcome_col_idxSEXP, SEXP nrepSEXP, SEXP output_fileSEXP, SEXP pertSEXP, SEXP base_seedSEXP, SEXP mediator_familySEXP, SEXP outcome_familySEXP, SEXP replace_outcomeSEXP, SEXP output_formatSEXP, SEXP chunk_sizeSEXP, SEXP grain_sizeSEXP) {
+void mediation_analysis_cpp(NumericMatrix data, CharacterVector column_names, IntegerVector exposure_col_idx, IntegerVector mediator_col_idx, IntegerVector outcome_col_idx, int nrep, std::string output_file, Rcpp::Nullable<Rcpp::NumericVector> weights, std::string pert, uint64_t base_seed, std::string mediator_family, std::string outcome_family, bool replace_outcome, std::string output_format, double treat_value, double control_value, int chunk_size, int grain_size);
+RcppExport SEXP _fastmed_mediation_analysis_cpp(SEXP dataSEXP, SEXP column_namesSEXP, SEXP exposure_col_idxSEXP, SEXP mediator_col_idxSEXP, SEXP outcome_col_idxSEXP, SEXP nrepSEXP, SEXP output_fileSEXP, SEXP weightsSEXP, SEXP pertSEXP, SEXP base_seedSEXP, SEXP mediator_familySEXP, SEXP outcome_familySEXP, SEXP replace_outcomeSEXP, SEXP output_formatSEXP, SEXP treat_valueSEXP, SEXP control_valueSEXP, SEXP chunk_sizeSEXP, SEXP grain_sizeSEXP) {
 BEGIN_RCPP
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< NumericMatrix >::type data(dataSEXP);
@@ -90,15 +90,18 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< IntegerVector >::type outcome_col_idx(outcome_col_idxSEXP);
     Rcpp::traits::input_parameter< int >::type nrep(nrepSEXP);
     Rcpp::traits::input_parameter< std::string >::type output_file(output_fileSEXP);
+    Rcpp::traits::input_parameter< Rcpp::Nullable<Rcpp::NumericVector> >::type weights(weightsSEXP);
     Rcpp::traits::input_parameter< std::string >::type pert(pertSEXP);
     Rcpp::traits::input_parameter< uint64_t >::type base_seed(base_seedSEXP);
     Rcpp::traits::input_parameter< std::string >::type mediator_family(mediator_familySEXP);
     Rcpp::traits::input_parameter< std::string >::type outcome_family(outcome_familySEXP);
     Rcpp::traits::input_parameter< bool >::type replace_outcome(replace_outcomeSEXP);
     Rcpp::traits::input_parameter< std::string >::type output_format(output_formatSEXP);
+    Rcpp::traits::input_parameter< double >::type treat_value(treat_valueSEXP);
+    Rcpp::traits::input_parameter< double >::type control_value(control_valueSEXP);
     Rcpp::traits::input_parameter< int >::type chunk_size(chunk_sizeSEXP);
     Rcpp::traits::input_parameter< int >::type grain_size(grain_sizeSEXP);
-    mediation_analysis_cpp(data, column_names, exposure_col_idx, mediator_col_idx, outcome_col_idx, nrep, output_file, pert, base_seed, mediator_family, outcome_family, replace_outcome, output_format, chunk_size, grain_size);
+    mediation_analysis_cpp(data, column_names, exposure_col_idx, mediator_col_idx, outcome_col_idx, nrep, output_file, weights, pert, base_seed, mediator_family, outcome_family, replace_outcome, output_format, treat_value, control_value, chunk_size, grain_size);
     return R_NilValue;
 END_RCPP
 }
@@ -109,7 +112,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastmed_fastmed_test_two_bootstrap_samples", (DL_FUNC) &_fastmed_fastmed_test_two_bootstrap_samples, 4},
     {"_fastmed_fastmed_test_ols_sigmas_cpp", (DL_FUNC) &_fastmed_fastmed_test_ols_sigmas_cpp, 3},
     {"_fastmed_glm_fit_cpp", (DL_FUNC) &_fastmed_glm_fit_cpp, 8},
-    {"_fastmed_mediation_analysis_cpp", (DL_FUNC) &_fastmed_mediation_analysis_cpp, 15},
+    {"_fastmed_mediation_analysis_cpp", (DL_FUNC) &_fastmed_mediation_analysis_cpp, 18},
     {NULL, NULL, 0}
 };
 

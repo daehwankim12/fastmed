@@ -13,9 +13,14 @@ mediation_analysis(
   pert = "asymptotic",
   seed = NULL,
   chunk_size = 10000,
+  grain_size = 100,
   mediator.family = "auto",
   outcome.family = "auto",
-  replace.outcome = FALSE
+  replace.outcome = FALSE,
+  output.format = c("mediate", "legacy"),
+  weights = NULL,
+  treat.value = 1,
+  control.value = 0
 )
 }
 \arguments{
@@ -43,6 +48,10 @@ environment.}
 to buffer per chunk inside the C++ backend. For large analyses, smaller
 values reduce peak memory usage. Default is 10000.}
 
+\item{grain_size}{Number of (exposure, mediator, outcome) combinations to
+process per parallel task inside the C++ backend. Larger values reduce
+scheduling overhead when individual combinations are cheap. Default is 100.}
+
 \item{mediator.family}{Model family for the mediator regression. One of
 `"auto"`, `"gaussian"`, `"binomial"`, `"poisson"`. Default is `"auto"`.}
 
@@ -57,6 +66,12 @@ observed outcome. Default is FALSE.}
 effect columns (`d0`, `d1`, `z0`, `z1`, `tau`). `"legacy"` writes the
 previous schema (`ACME_*`, `ADE_*`, `Total_Effect_*`). Default is
 `"mediate"`.}
+
+\item{weights}{Optional numeric vector of prior weights (length `nrow(data)`). Non-negative, finite, and must sum to a positive value. Default is `NULL` (unweighted).}
+
+\item{treat.value}{Numeric scalar giving the treatment value for `T=1` potential outcomes. Default is 1.}
+
+\item{control.value}{Numeric scalar giving the control value for `T=0` potential outcomes. Default is 0.}
 }
 \value{
 None.  The results are written to the specified `output_file` in CSV format.

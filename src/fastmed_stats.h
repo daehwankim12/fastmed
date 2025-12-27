@@ -13,6 +13,8 @@ struct StatisticsSummary {
     double p_value;
 };
 
+inline double pval_mediate(const std::vector<double>& sims, double estimate);
+
 inline double mean_cpp(const std::vector<double>& data) {
     if (data.empty()) {
         throw std::runtime_error("Cannot calculate mean of empty vector");
@@ -86,6 +88,23 @@ inline StatisticsSummary calculate_statistics_inplace(std::vector<double>& sampl
             p};
 }
 
+inline StatisticsSummary calculate_statistics_inplace_with_estimate(
+    std::vector<double>& samples,
+    double estimate) {
+    if (samples.empty()) {
+        throw std::runtime_error("calculate_statistics_inplace_with_estimate: empty");
+    }
+
+    const double alpha = 0.05;
+
+    std::sort(samples.begin(), samples.end());
+
+    return {estimate,
+            quantile_type7_sorted(samples, alpha / 2.0),
+            quantile_type7_sorted(samples, 1.0 - alpha / 2.0),
+            pval_mediate(samples, estimate)};
+}
+
 // mediation::pval-style sign test:
 // if estimate == 0 => 1; else p = 2*min(#pos,#neg)/N
 inline double pval_mediate(const std::vector<double>& sims, double estimate) {
@@ -110,4 +129,3 @@ inline double pval_mediate(const std::vector<double>& sims, double estimate) {
                static_cast<double>(sims.size());
     return (p > 1.0 ? 1.0 : p);
 }
-
