@@ -5,3 +5,9 @@
 ^cran-comments\.md$
 ^\.github$
 ^LICENSE\.md$
+^doc$
+^Meta$
+^\.renv_root$
+^\.Rlib$
+^\.idea$
+^\.serena$

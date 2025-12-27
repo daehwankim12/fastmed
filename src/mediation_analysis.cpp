@@ -41,7 +41,9 @@ void mediation_analysis_cpp(NumericMatrix data,
                             double treat_value = 1.0,
                             double control_value = 0.0,
                             int chunk_size = 1024,
-                            int grain_size = 1) {
+                            int grain_size = 1,
+                            bool overwrite = true,
+                            bool excel_safe_csv = false) {
     try {
         if (data.nrow() == 0 || data.ncol() == 0) {
             throw std::invalid_argument("Data matrix is empty");
@@ -65,6 +67,11 @@ void mediation_analysis_cpp(NumericMatrix data,
         if (nrep <= 0) {
             throw std::invalid_argument(
                 "Number of bootstrap replicates must be positive");
+        }
+        const int max_nrep = std::numeric_limits<int>::max() / 3;
+        if (nrep > max_nrep) {
+            throw std::invalid_argument("nrep is too large (max " +
+                                        std::to_string(max_nrep) + ")");
         }
         if (pert != "asymptotic" && pert != "bootstrap") {
             throw std::invalid_argument(
@@ -199,6 +206,14 @@ void mediation_analysis_cpp(NumericMatrix data,
         const size_t em = checked_mul(e, m);
         const size_t num_combinations = checked_mul(em, o);
 
+        if (!overwrite) {
+            std::ifstream existing(output_file);
+            if (existing.good()) {
+                throw std::runtime_error("Output file exists and overwrite is FALSE: " +
+                                         output_file);
+            }
+        }
+
         std::ofstream output_stream;
         output_stream.open(output_file, std::ios::out | std::ios::trunc);
         if (!output_stream.is_open()) {
@@ -255,6 +270,7 @@ void mediation_analysis_cpp(NumericMatrix data,
                                    pert,
                                    replace_outcome,
                                    legacy_output_schema,
+                                   excel_safe_csv,
                                    treat_value,
                                    control_value,
                                    base_seed,
@@ -266,6 +282,8 @@ void mediation_analysis_cpp(NumericMatrix data,
             for (const auto& line : chunk_results) {
                 output_stream << line;
             }
+
+            Rcpp::checkUserInterrupt();
         }
         output_stream.flush();
 

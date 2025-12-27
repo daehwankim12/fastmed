@@ -32,6 +32,7 @@ private:
     std::string pert_method;
     const bool replace_outcome;
     const bool legacy_output_schema;
+    const bool excel_safe_csv;
     const double treat_value;
     const double control_value;
     const uint64_t base_seed;
@@ -53,6 +54,7 @@ public:
                     const std::string& pert_method_,
                     bool replace_outcome_,
                     bool legacy_output_schema_,
+                    bool excel_safe_csv_,
                     double treat_value_,
                     double control_value_,
                     uint64_t base_seed_,

@@ -43,3 +43,5 @@ src/*.so
 renv
 .renv_root
 
+/doc/
+/Meta/

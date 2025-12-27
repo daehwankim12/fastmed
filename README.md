@@ -80,6 +80,8 @@ print(results)
 - `columns`: A list with three named elements: exposure, mediator, and outcome. Each element can be one or more prefixes (character vector).
 - `nrep`: (Optional) Number of simulation draws (asymptotic) or bootstrap replicates (bootstrap). Default is 1000.
 - `output_file`: Path to the output CSV file where results will be saved.
+- `overwrite`: (Optional) If `FALSE` and `output_file` already exists, error instead of overwriting. Default is `TRUE`.
+- `excel_safe_csv`: (Optional) If `TRUE`, prefix potentially dangerous spreadsheet formula strings (values starting with `=`, `+`, `-`, `@`) with a leading `'` in the output CSV. Default is `FALSE`.
 - `num_threads`: (Optional) Number of threads for parallel processing. Defaults to the number of available cores.
 - `pert`: (Optional) Uncertainty method, one of `"asymptotic"` or `"bootstrap"`. Default is `"asymptotic"`.
 - `seed`: (Optional) Non-negative integer seed for reproducible results across thread counts (within the same build/runtime environment).

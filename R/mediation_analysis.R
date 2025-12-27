@@ -13,7 +13,15 @@
 #' @param nrep An integer specifying the number of simulation draws (asymptotic)
 #'   or bootstrap replicates (bootstrap). Higher values generally lead to more
 #'   stable estimates but increase computation time. Default is 1000.
-#' @param output_file A character string specifying the path to the output CSV file.  Results are written to this file in real-time.  The file will be overwritten if it already exists.
+#' @param output_file A character string specifying the path to the output CSV
+#'   file. Results are written to this file in real-time.
+#' @param overwrite Logical; if `FALSE` and `output_file` already exists, throw
+#'   an error instead of overwriting. Default is `TRUE` (preserves existing
+#'   behavior).
+#' @param excel_safe_csv Logical; if `TRUE`, prefix potentially dangerous
+#'   spreadsheet formula strings (e.g. values starting with `=`, `+`, `-`, `@`)
+#'   with a leading `'` in the output CSV. Default is `FALSE` (preserves
+#'   existing output).
 #' @param num_threads An integer specifying the number of threads to use for parallel processing.  Default is the number of available cores detected by `parallel::detectCores()`.
 #' @param pert A character string specifying the method to use for uncertainty
 #'   estimation. Options are `"asymptotic"` and `"bootstrap"`. Default is
@@ -51,7 +59,7 @@
 #' intervals, and p-values for each effect and combination of variables.
 #'
 #' Family auto-detection is based on the response values:
-#' * All values in `{0,1}` -> Binomial
+#' * All values are 0/1 -> Binomial
 #' * All values are non-negative integers -> Poisson
 #' * Otherwise -> Gaussian
 #'
@@ -99,7 +107,9 @@ mediation_analysis <- function(data,
                                output.format = c("mediate", "legacy"),
                                weights = NULL,
                                treat.value = 1,
-                               control.value = 0) {
+                               control.value = 0,
+                               overwrite = TRUE,
+                               excel_safe_csv = FALSE) {
   if (!is.numeric(nrep) || length(nrep) != 1 || is.na(nrep) || nrep <= 0) {
     stop("nrep must be a positive integer.")
   }
@@ -107,6 +117,13 @@ mediation_analysis <- function(data,
 
   if (!is.character(output_file) || length(output_file) != 1 || is.na(output_file) || !nzchar(output_file)) {
     stop("output_file must be a non-empty character scalar.")
+  }
+
+  if (!is.logical(overwrite) || length(overwrite) != 1L || is.na(overwrite)) {
+    stop("overwrite must be TRUE or FALSE.")
+  }
+  if (!is.logical(excel_safe_csv) || length(excel_safe_csv) != 1L || is.na(excel_safe_csv)) {
+    stop("excel_safe_csv must be TRUE or FALSE.")
   }
 
   if (!is.numeric(num_threads) || length(num_threads) != 1 || is.na(num_threads) || num_threads <= 0) {
@@ -216,6 +233,9 @@ mediation_analysis <- function(data,
     base_seed <- sample.int(.Machine$integer.max, 1)
   }
 
+  overwrite <- isTRUE(overwrite)
+  excel_safe_csv <- isTRUE(excel_safe_csv)
+
   all_columns <- names(data)
   exposure_cols <- find_matching_columns(columns$exposure, all_columns, "exposure")
   mediator_cols <- find_matching_columns(columns$mediator, all_columns, "mediator")
@@ -290,7 +310,9 @@ mediation_analysis <- function(data,
     treat_value = treat.value,
     control_value = control.value,
     chunk_size = chunk_size,
-    grain_size = grain_size
+    grain_size = grain_size,
+    overwrite = overwrite,
+    excel_safe_csv = excel_safe_csv
   )
 
   cat("Mediation analysis completed. Results saved to", output_file, "\n")

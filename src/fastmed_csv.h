@@ -2,6 +2,7 @@
 
 #include "fastmed_stats.h"
 
+#include <cctype>
 #include <charconv>
 #include <cmath>
 #include <cstdio>
@@ -31,6 +32,30 @@ inline std::string csv_escape(const std::string& field) {
     }
     escaped += "\"";
     return escaped;
+}
+
+inline std::string csv_escape(const std::string& field, bool excel_safe_csv) {
+    if (!excel_safe_csv) {
+        return csv_escape(field);
+    }
+
+    size_t i = 0;
+    while (i < field.size() &&
+           std::isspace(static_cast<unsigned char>(field[i])) != 0) {
+        ++i;
+    }
+    if (i < field.size()) {
+        const char c = field[i];
+        if (c == '=' || c == '+' || c == '-' || c == '@') {
+            std::string prefixed;
+            prefixed.reserve(field.size() + 1);
+            prefixed.push_back('\'');
+            prefixed += field;
+            return csv_escape(prefixed);
+        }
+    }
+
+    return csv_escape(field);
 }
 
 namespace fastmed_detail {
@@ -83,4 +108,3 @@ inline void append_statistics(std::string& out, const StatisticsSummary& stats) 
     out.push_back(',');
     append_csv_double_fixed6(out, stats.p_value);
 }
-

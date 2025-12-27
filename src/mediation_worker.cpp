@@ -44,6 +44,7 @@ MediationWorker::MediationWorker(const Eigen::Map<const MatrixXd>& data_,
                                  const std::string& pert_method_,
                                  bool replace_outcome_,
                                  bool legacy_output_schema_,
+                                 bool excel_safe_csv_,
                                  double treat_value_,
                                  double control_value_,
                                  uint64_t base_seed_,
@@ -63,6 +64,7 @@ MediationWorker::MediationWorker(const Eigen::Map<const MatrixXd>& data_,
       pert_method(pert_method_),
       replace_outcome(replace_outcome_),
       legacy_output_schema(legacy_output_schema_),
+      excel_safe_csv(excel_safe_csv_),
       treat_value(treat_value_),
       control_value(control_value_),
       base_seed(base_seed_),
@@ -93,7 +95,7 @@ std::string MediationWorker::format_na_row(const std::string& exposure_col,
 
     std::string result;
     result.reserve(combination.size() + 128);
-    result += csv_escape(combination);
+    result += csv_escape(combination, excel_safe_csv);
     const int na_cols = legacy_output_schema ? 12 : 20;
     for (int i = 0; i < na_cols; ++i) {
         result += ",NA";
@@ -257,9 +259,9 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_resample(
     std::vector<BootstrapResult> results;
     results.reserve(nrep);
 
-    const int MAX_ATTEMPTS = 3 * nrep;
+    const int64_t MAX_ATTEMPTS = 3LL * static_cast<int64_t>(nrep);
     int rep_idx = 0;
-    int total_attempts = 0;
+    int64_t total_attempts = 0;
     std::string last_exception_msg;
     const int p_med = 2;
     const int p_out = 3;
@@ -419,8 +421,8 @@ BootstrapResult MediationWorker::simulate_effect_draw(
         } else {  // Poisson
             double lam0 = safe_exp(eta_m0);
             double lam1 = safe_exp(eta_m1);
-            std::poisson_distribution<int> p0(lam0);
-            std::poisson_distribution<int> p1(lam1);
+            SafePoissonSampler p0(lam0);
+            SafePoissonSampler p1(lam1);
             for (int i = 0; i < n; ++i) {
                 sum_wM0 += weights_obs[i] * static_cast<double>(p0(rng));
                 sum_wM1 += weights_obs[i] * static_cast<double>(p1(rng));
@@ -520,8 +522,8 @@ BootstrapResult MediationWorker::simulate_effect_draw(
     } else {  // Poisson
         double lam0 = safe_exp(eta_m0);
         double lam1 = safe_exp(eta_m1);
-        std::poisson_distribution<int> p0(lam0);
-        std::poisson_distribution<int> p1(lam1);
+        SafePoissonSampler p0(lam0);
+        SafePoissonSampler p1(lam1);
         for (int i = 0; i < n; ++i) {
             const double M0_i = static_cast<double>(p0(rng));
             const double M1_i = static_cast<double>(p1(rng));
@@ -616,7 +618,7 @@ std::string MediationWorker::format_results(
 
     std::string result;
     result.reserve(combination.size() + 512);
-    result += csv_escape(combination);
+    result += csv_escape(combination, excel_safe_csv);
     result.push_back(',');
     if (legacy_output_schema) {
         append_statistics(result, d0_stats);

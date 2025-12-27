@@ -20,7 +20,9 @@ mediation_analysis(
   output.format = c("mediate", "legacy"),
   weights = NULL,
   treat.value = 1,
-  control.value = 0
+  control.value = 0,
+  overwrite = TRUE,
+  excel_safe_csv = FALSE
 )
 }
 \arguments{
@@ -32,7 +34,8 @@ mediation_analysis(
 or bootstrap replicates (bootstrap). Higher values generally lead to more
 stable estimates but increase computation time. Default is 1000.}
 
-\item{output_file}{A character string specifying the path to the output CSV file.  Results are written to this file in real-time.  The file will be overwritten if it already exists.}
+\item{output_file}{A character string specifying the path to the output CSV
+file. Results are written to this file in real-time.}
 
 \item{num_threads}{An integer specifying the number of threads to use for parallel processing.  Default is the number of available cores detected by `parallel::detectCores()`.}
 
@@ -45,8 +48,8 @@ reproducible across thread counts within the same build/runtime
 environment.}
 
 \item{chunk_size}{Maximum number of (exposure, mediator, outcome) combinations
-to buffer per chunk inside the C++ backend. For large analyses, smaller
-values reduce peak memory usage. Default is 10000.}
+to buffer per chunk inside the C++ backend. Smaller values reduce peak
+memory usage for very large analyses. Default is 10000.}
 
 \item{grain_size}{Number of (exposure, mediator, outcome) combinations to
 process per parallel task inside the C++ backend. Larger values reduce
@@ -72,6 +75,15 @@ previous schema (`ACME_*`, `ADE_*`, `Total_Effect_*`). Default is
 \item{treat.value}{Numeric scalar giving the treatment value for `T=1` potential outcomes. Default is 1.}
 
 \item{control.value}{Numeric scalar giving the control value for `T=0` potential outcomes. Default is 0.}
+
+\item{overwrite}{Logical; if `FALSE` and `output_file` already exists, throw
+an error instead of overwriting. Default is `TRUE` (preserves existing
+behavior).}
+
+\item{excel_safe_csv}{Logical; if `TRUE`, prefix potentially dangerous
+spreadsheet formula strings (e.g. values starting with `=`, `+`, `-`, `@`)
+with a leading `'` in the output CSV. Default is `FALSE` (preserves
+existing output).}
 }
 \value{
 None.  The results are written to the specified `output_file` in CSV format.
@@ -93,11 +105,8 @@ This function estimates the following effects:
 The output CSV file includes mean estimates, 95% percentile confidence
 intervals, and p-values for each effect and combination of variables.
 
-The default output schema (`output.format = "mediate"`) is:
-\preformatted{Combination,d0_estimate,d0_ci_lower,d0_ci_upper,d0_p,d1_estimate,d1_ci_lower,d1_ci_upper,d1_p,z0_estimate,z0_ci_lower,z0_ci_upper,z0_p,z1_estimate,z1_ci_lower,z1_ci_upper,z1_p,tau_estimate,tau_ci_lower,tau_ci_upper,tau_p}
-
 Family auto-detection is based on the response values:
-* All values in `{0,1}` -> Binomial
+* All values are 0/1 -> Binomial
 * All values are non-negative integers -> Poisson
 * Otherwise -> Gaussian
 
