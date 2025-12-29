@@ -532,10 +532,15 @@ test_that("p-value matches mediation:::pval when available", {
   sims <- c(rep(1, 100), -1)
   est <- mean(sims)
 
-  expected <- if ("c0" %in% names(formals(pval))) {
-    pval(sims, c0 = est)
-  } else {
-    pval(sims)
+  expected <- {
+    fmls <- names(formals(pval))
+    if ("c0" %in% fmls) {
+      pval(sims, c0 = est)
+    } else if ("xhat" %in% fmls) {
+      pval(sims, xhat = est)
+    } else {
+      pval(sims)
+    }
   }
 
   got <- fastmed:::fastmed_test_p_value_cpp(sims)

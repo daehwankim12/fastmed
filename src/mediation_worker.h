@@ -36,6 +36,7 @@ private:
     const double treat_value;
     const double control_value;
     const uint64_t base_seed;
+    const bool match_mediation;
     const size_t chunk_begin;
     std::vector<std::string>& output_lines;
 
@@ -58,6 +59,7 @@ public:
                     double treat_value_,
                     double control_value_,
                     uint64_t base_seed_,
+                    bool match_mediation_,
                     size_t chunk_begin_,
                     std::vector<std::string>& output_lines_);
 
@@ -85,6 +87,16 @@ private:
         const Eigen::Ref<const Eigen::VectorXd>& outcome_obs,
         bool replace_outcome_);
 
+    std::vector<BootstrapResult> perform_bootstrap_asymptotic_mediation(
+        const GlmFit& fit_m,
+        const GlmFit& fit_y,
+        GlmFamily fam_m,
+        GlmFamily fam_y,
+        int n,
+        const Eigen::Ref<const Eigen::VectorXd>& exposure_obs,
+        const Eigen::Ref<const Eigen::VectorXd>& outcome_obs,
+        bool replace_outcome_);
+
     std::vector<BootstrapResult> perform_bootstrap_resample(
         const Eigen::Ref<const Eigen::VectorXd>& exposure,
         const Eigen::Ref<const Eigen::VectorXd>& mediator,
@@ -94,6 +106,19 @@ private:
         int n,
         uint64_t global_combination_idx,
         bool replace_outcome_);
+
+    std::vector<BootstrapResult> perform_bootstrap_resample_mediation(
+        const GlmFit& fit_m,
+        const GlmFit& fit_y,
+        const Eigen::Ref<const Eigen::VectorXd>& exposure,
+        const Eigen::Ref<const Eigen::VectorXd>& mediator,
+        const Eigen::Ref<const Eigen::VectorXd>& outcome,
+        GlmFamily fam_m,
+        GlmFamily fam_y,
+        int n,
+        const Eigen::Ref<const Eigen::VectorXd>& weights_obs,
+        bool replace_outcome_,
+        BootstrapResult* t0_out);
 
     BootstrapResult simulate_effect_draw(
         const Eigen::VectorXd& bm,

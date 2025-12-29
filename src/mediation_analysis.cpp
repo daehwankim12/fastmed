@@ -43,7 +43,8 @@ void mediation_analysis_cpp(NumericMatrix data,
                             int chunk_size = 1024,
                             int grain_size = 1,
                             bool overwrite = true,
-                            bool excel_safe_csv = false) {
+                            bool excel_safe_csv = false,
+                            bool match_mediation = false) {
     try {
         if (data.nrow() == 0 || data.ncol() == 0) {
             throw std::invalid_argument("Data matrix is empty");
@@ -89,6 +90,9 @@ void mediation_analysis_cpp(NumericMatrix data,
         }
         if (grain_size <= 0) {
             throw std::invalid_argument("grain_size must be positive");
+        }
+        if (match_mediation && base_seed > static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+            throw std::invalid_argument("match_mediation requires base_seed <= .Machine$integer.max");
         }
 
         std::vector<std::string> column_names_cpp =
@@ -220,6 +224,12 @@ void mediation_analysis_cpp(NumericMatrix data,
             throw std::runtime_error("Failed to open output file: " + output_file);
         }
 
+        if (match_mediation) {
+            Rcpp::Environment base_env = Rcpp::Environment::base_env();
+            Rcpp::Function set_seed = base_env["set.seed"];
+            set_seed(static_cast<int>(base_seed));
+        }
+
         const bool legacy_output_schema = [&]() {
             if (output_format == "legacy") {
                 return true;
@@ -274,10 +284,15 @@ void mediation_analysis_cpp(NumericMatrix data,
                                    treat_value,
                                    control_value,
                                    base_seed,
+                                   match_mediation,
                                    chunk_begin,
                                    chunk_results);
 
-            RcppParallel::parallelFor(chunk_begin, chunk_end, worker, grain_size_cpp);
+            if (match_mediation) {
+                worker(chunk_begin, chunk_end);
+            } else {
+                RcppParallel::parallelFor(chunk_begin, chunk_end, worker, grain_size_cpp);
+            }
 
             for (const auto& line : chunk_results) {
                 output_stream << line;

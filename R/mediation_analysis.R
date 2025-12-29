@@ -99,6 +99,7 @@ mediation_analysis <- function(data,
                                num_threads = parallel::detectCores(),
                                pert = "asymptotic",
                                seed = NULL,
+                               match_mediation = !is.null(seed),
                                chunk_size = 10000,
                                grain_size = 100,
                                mediator.family = "auto",
@@ -134,6 +135,11 @@ mediation_analysis <- function(data,
   if (!is.character(pert) || length(pert) != 1 || is.na(pert) || !pert %in% c("asymptotic", "bootstrap")) {
     stop("pert must be one of: 'asymptotic', 'bootstrap'.")
   }
+
+  if (!is.logical(match_mediation) || length(match_mediation) != 1L || is.na(match_mediation)) {
+    stop("match_mediation must be TRUE or FALSE.")
+  }
+  match_mediation <- isTRUE(match_mediation)
 
   if (!is.numeric(chunk_size) || length(chunk_size) != 1 || is.na(chunk_size) || chunk_size <= 0) {
     stop("chunk_size must be a positive integer.")
@@ -216,7 +222,11 @@ mediation_analysis <- function(data,
   storage.mode(data_mat) <- "double"
 
   # Set number of threads for RcppParallel
-  RcppParallel::setThreadOptions(numThreads = num_threads)
+  if (match_mediation) {
+    RcppParallel::setThreadOptions(numThreads = 1L)
+  } else {
+    RcppParallel::setThreadOptions(numThreads = num_threads)
+  }
 
   if (!is.null(seed)) {
     if (!is.numeric(seed) || length(seed) != 1 || is.na(seed) || !is.finite(seed)) {
@@ -312,7 +322,8 @@ mediation_analysis <- function(data,
     chunk_size = chunk_size,
     grain_size = grain_size,
     overwrite = overwrite,
-    excel_safe_csv = excel_safe_csv
+    excel_safe_csv = excel_safe_csv,
+    match_mediation = match_mediation
   )
 
   cat("Mediation analysis completed. Results saved to", output_file, "\n")

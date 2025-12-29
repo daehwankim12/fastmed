@@ -28,6 +28,67 @@ MatrixXd cholesky_lower_or_throw(MatrixXd cov, const std::string& context) {
     }
     return L;
 }
+
+MatrixXd sqrtm_eigen_or_throw(const MatrixXd& cov, const std::string& context) {
+    if (cov.rows() != cov.cols()) {
+        throw std::runtime_error("sqrtm_eigen_or_throw: non-square cov for " + context);
+    }
+    MatrixXd cov_sym = 0.5 * (cov + cov.transpose());
+
+    Rcpp::Environment base_env = Rcpp::Environment::base_env();
+    Rcpp::Function eigen = base_env["eigen"];
+    Rcpp::List ev = eigen(Rcpp::wrap(cov_sym),
+                          Rcpp::Named("symmetric") = true,
+                          Rcpp::Named("only.values") = false);
+
+    Rcpp::NumericVector values = ev["values"];
+    Rcpp::NumericMatrix vectors = ev["vectors"];
+    if (vectors.nrow() != cov_sym.rows() || vectors.ncol() != cov_sym.cols()) {
+        throw std::runtime_error("sqrtm_eigen_or_throw: eigen dimension mismatch for " + context);
+    }
+
+    const int p = cov_sym.rows();
+    Eigen::Map<const MatrixXd> V(vectors.begin(), p, p);
+    VectorXd sqrt_vals(p);
+    for (int i = 0; i < p; ++i) {
+        const double v = values[i];
+        sqrt_vals[i] = std::sqrt(std::max(0.0, v));
+    }
+
+    MatrixXd R = V * sqrt_vals.asDiagonal() * V.transpose();
+    if (!R.allFinite()) {
+        throw std::runtime_error("sqrtm_eigen_or_throw: non-finite sqrt cov for " + context);
+    }
+    return R;
+}
+
+MatrixXd rmvnorm_eigen(int n, const VectorXd& mean, const MatrixXd& sigma, const std::string& context) {
+    if (n <= 0) {
+        throw std::runtime_error("rmvnorm_eigen: n must be positive");
+    }
+    if (sigma.rows() != sigma.cols()) {
+        throw std::runtime_error("rmvnorm_eigen: sigma must be square for " + context);
+    }
+    const int p = sigma.rows();
+    if (mean.size() != p) {
+        throw std::runtime_error("rmvnorm_eigen: mean/sigma size mismatch for " + context);
+    }
+
+    const MatrixXd R = sqrtm_eigen_or_throw(sigma, context);
+
+    Rcpp::NumericVector z = Rcpp::rnorm(n * p);
+    MatrixXd out(n, p);
+    int idx = 0;
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < p; ++j) {
+            out(i, j) = z[idx++];
+        }
+    }
+
+    out = out * R;
+    out.rowwise() += mean.transpose();
+    return out;
+}
 }  // namespace
 
 MediationWorker::MediationWorker(const Eigen::Map<const MatrixXd>& data_,
@@ -48,6 +109,7 @@ MediationWorker::MediationWorker(const Eigen::Map<const MatrixXd>& data_,
                                  double treat_value_,
                                  double control_value_,
                                  uint64_t base_seed_,
+                                 bool match_mediation_,
                                  size_t chunk_begin_,
                                  std::vector<std::string>& output_lines_)
     : data(data_),
@@ -68,6 +130,7 @@ MediationWorker::MediationWorker(const Eigen::Map<const MatrixXd>& data_,
       treat_value(treat_value_),
       control_value(control_value_),
       base_seed(base_seed_),
+      match_mediation(match_mediation_),
       chunk_begin(chunk_begin_),
       output_lines(output_lines_) {}
 
@@ -160,30 +223,51 @@ std::string MediationWorker::process_combination(std::size_t idx,
         BootstrapResult t0_result{};
         const BootstrapResult* t0_ptr = nullptr;
         if (pert_method == "asymptotic") {
-            bootstrap_results = perform_bootstrap_asymptotic(
-                fit_m, fit_y, fam_m, fam_y, n, global_combination_idx, exposure,
-                outcome, replace_outcome);
+            if (match_mediation) {
+                bootstrap_results = perform_bootstrap_asymptotic_mediation(
+                    fit_m, fit_y, fam_m, fam_y, n, exposure, outcome, replace_outcome);
+            } else {
+                bootstrap_results = perform_bootstrap_asymptotic(
+                    fit_m, fit_y, fam_m, fam_y, n, global_combination_idx, exposure,
+                    outcome, replace_outcome);
+            }
         } else if (pert_method == "bootstrap") {
-            std::mt19937_64 rng_t0(
-                derive_seed(base_seed,
-                            global_combination_idx,
-                            std::numeric_limits<uint64_t>::max()));
-            const double sigma2_m =
-                (fam_m == GlmFamily::Gaussian) ? fit_m.dispersion : 1.0;
-            t0_result = simulate_effect_draw(fit_m.coef,
-                                             fit_y.coef,
-                                             fam_m,
-                                             fam_y,
-                                             sigma2_m,
-                                             rng_t0,
-                                             exposure,
-                                             outcome,
-                                             weights,
-                                             replace_outcome);
-            t0_ptr = &t0_result;
-            bootstrap_results = perform_bootstrap_resample(
-                exposure, mediator, outcome, fam_m, fam_y, n, global_combination_idx,
-                replace_outcome);
+            if (match_mediation) {
+                bootstrap_results = perform_bootstrap_resample_mediation(
+                    fit_m,
+                    fit_y,
+                    exposure,
+                    mediator,
+                    outcome,
+                    fam_m,
+                    fam_y,
+                    n,
+                    weights,
+                    replace_outcome,
+                    &t0_result);
+                t0_ptr = &t0_result;
+            } else {
+                std::mt19937_64 rng_t0(
+                    derive_seed(base_seed,
+                                global_combination_idx,
+                                std::numeric_limits<uint64_t>::max()));
+                const double sigma2_m =
+                    (fam_m == GlmFamily::Gaussian) ? fit_m.dispersion : 1.0;
+                t0_result = simulate_effect_draw(fit_m.coef,
+                                                 fit_y.coef,
+                                                 fam_m,
+                                                 fam_y,
+                                                 sigma2_m,
+                                                 rng_t0,
+                                                 exposure,
+                                                 outcome,
+                                                 weights,
+                                                 replace_outcome);
+                t0_ptr = &t0_result;
+                bootstrap_results = perform_bootstrap_resample(
+                    exposure, mediator, outcome, fam_m, fam_y, n, global_combination_idx,
+                    replace_outcome);
+            }
         } else {
             throw std::invalid_argument("Unknown perturbation method: " + pert_method);
         }
@@ -242,6 +326,161 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_asymptotic(
                                                outcome_obs,
                                                weights,
                                                replace_outcome_));
+    }
+
+    return results;
+}
+
+std::vector<BootstrapResult> MediationWorker::perform_bootstrap_asymptotic_mediation(
+    const GlmFit& fit_m,
+    const GlmFit& fit_y,
+    GlmFamily fam_m,
+    GlmFamily fam_y,
+    int n,
+    const Eigen::Ref<const VectorXd>& exposure_obs,
+    const Eigen::Ref<const VectorXd>& outcome_obs,
+    bool replace_outcome_) {
+    Rcpp::RNGScope rng_scope;
+
+    std::vector<BootstrapResult> results;
+    results.reserve(nrep);
+
+    const MatrixXd MModel = rmvnorm_eigen(nrep, fit_m.coef, fit_m.vcov, "mediator model vcov");
+    const MatrixXd YModel = rmvnorm_eigen(nrep, fit_y.coef, fit_y.vcov, "outcome model vcov");
+
+    VectorXd mu_m1(nrep);
+    VectorXd mu_m0(nrep);
+    for (int s = 0; s < nrep; ++s) {
+        const double eta1 = MModel(s, 0) + MModel(s, 1) * treat_value;
+        const double eta0 = MModel(s, 0) + MModel(s, 1) * control_value;
+        mu_m1[s] = linkinv(eta1, fam_m);
+        mu_m0[s] = linkinv(eta0, fam_m);
+    }
+
+    MatrixXd M1(nrep, n);
+    MatrixXd M0(nrep, n);
+
+    if (fam_m == GlmFamily::Gaussian) {
+        const double sd = std::sqrt(std::max(0.0, fit_m.dispersion));
+        Rcpp::NumericVector err = Rcpp::rnorm(static_cast<int>(nrep) * n, 0.0, sd);
+        Eigen::Map<const MatrixXd> E(err.begin(), nrep, n);
+
+        for (int j = 0; j < n; ++j) {
+            M1.col(j) = mu_m1;
+            M0.col(j) = mu_m0;
+        }
+        M1 += E;
+        M0 += E;
+    } else if (fam_m == GlmFamily::Binomial) {
+        Rcpp::NumericVector prob1(static_cast<int>(nrep) * n);
+        Rcpp::NumericVector prob0(static_cast<int>(nrep) * n);
+        for (int j = 0; j < n; ++j) {
+            const int base = j * nrep;
+            for (int s = 0; s < nrep; ++s) {
+                prob1[base + s] = mu_m1[s];
+                prob0[base + s] = mu_m0[s];
+            }
+        }
+
+        Rcpp::Environment stats_env = Rcpp::Environment::namespace_env("stats");
+        Rcpp::Function rbinom = stats_env["rbinom"];
+        Rcpp::NumericVector draws1 =
+            rbinom(Rcpp::Named("n") = static_cast<int>(nrep) * n,
+                   Rcpp::Named("size") = 1.0,
+                   Rcpp::Named("prob") = prob1);
+        Rcpp::NumericVector draws0 =
+            rbinom(Rcpp::Named("n") = static_cast<int>(nrep) * n,
+                   Rcpp::Named("size") = 1.0,
+                   Rcpp::Named("prob") = prob0);
+
+        Eigen::Map<const MatrixXd> M1_map(draws1.begin(), nrep, n);
+        Eigen::Map<const MatrixXd> M0_map(draws0.begin(), nrep, n);
+        M1 = M1_map;
+        M0 = M0_map;
+    } else {  // Poisson
+        Rcpp::NumericVector lambda1(static_cast<int>(nrep) * n);
+        Rcpp::NumericVector lambda0(static_cast<int>(nrep) * n);
+        for (int j = 0; j < n; ++j) {
+            const int base = j * nrep;
+            for (int s = 0; s < nrep; ++s) {
+                lambda1[base + s] = mu_m1[s];
+                lambda0[base + s] = mu_m0[s];
+            }
+        }
+
+        Rcpp::Environment stats_env = Rcpp::Environment::namespace_env("stats");
+        Rcpp::Function rpois = stats_env["rpois"];
+        Rcpp::NumericVector draws1 =
+            rpois(Rcpp::Named("n") = static_cast<int>(nrep) * n,
+                  Rcpp::Named("lambda") = lambda1);
+        Rcpp::NumericVector draws0 =
+            rpois(Rcpp::Named("n") = static_cast<int>(nrep) * n,
+                  Rcpp::Named("lambda") = lambda0);
+
+        Eigen::Map<const MatrixXd> M1_map(draws1.begin(), nrep, n);
+        Eigen::Map<const MatrixXd> M0_map(draws0.begin(), nrep, n);
+        M1 = M1_map;
+        M0 = M0_map;
+    }
+
+    const double weight_sum = weights.sum();
+    if (!(weight_sum > 0.0) || !std::isfinite(weight_sum)) {
+        throw std::runtime_error("perform_bootstrap_asymptotic_mediation: non-positive weight sum");
+    }
+
+    for (int s = 0; s < nrep; ++s) {
+        const double by0 = YModel(s, 0);
+        const double by1 = YModel(s, 1);
+        const double by2 = YModel(s, 2);
+
+        double sum_y00 = 0.0;
+        double sum_y01 = 0.0;
+        double sum_y10 = 0.0;
+        double sum_y11 = 0.0;
+
+        for (int i = 0; i < n; ++i) {
+            const double M1_i = M1(s, i);
+            const double M0_i = M0(s, i);
+
+            const double eta00 = by0 + by1 * M0_i + by2 * control_value;
+            const double eta01 = by0 + by1 * M1_i + by2 * control_value;
+            const double eta10 = by0 + by1 * M0_i + by2 * treat_value;
+            const double eta11 = by0 + by1 * M1_i + by2 * treat_value;
+
+            double y00 = linkinv(eta00, fam_y);
+            double y01 = linkinv(eta01, fam_y);
+            double y10 = linkinv(eta10, fam_y);
+            double y11 = linkinv(eta11, fam_y);
+
+            if (replace_outcome_) {
+                const double xi = exposure_obs[i];
+                if (std::fabs(xi - control_value) < 1e-12) {
+                    y00 = outcome_obs[i];
+                }
+                if (std::fabs(xi - treat_value) < 1e-12) {
+                    y11 = outcome_obs[i];
+                }
+            }
+
+            const double wi = weights[i];
+            sum_y00 += wi * y00;
+            sum_y01 += wi * y01;
+            sum_y10 += wi * y10;
+            sum_y11 += wi * y11;
+        }
+
+        const double mean_y00 = sum_y00 / weight_sum;
+        const double mean_y01 = sum_y01 / weight_sum;
+        const double mean_y10 = sum_y10 / weight_sum;
+        const double mean_y11 = sum_y11 / weight_sum;
+
+        const double d0 = mean_y01 - mean_y00;
+        const double d1 = mean_y11 - mean_y10;
+        const double z0 = mean_y10 - mean_y00;
+        const double z1 = mean_y11 - mean_y01;
+        const double tau = 0.5 * (d0 + d1 + z0 + z1);
+
+        results.push_back({d0, d1, z0, z1, tau});
     }
 
     return results;
@@ -363,6 +602,190 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_resample(
                 last_exception_msg = e.what();
             }
         }
+    }
+
+    return results;
+}
+
+std::vector<BootstrapResult> MediationWorker::perform_bootstrap_resample_mediation(
+    const GlmFit& fit_m,
+    const GlmFit& fit_y,
+    const Eigen::Ref<const VectorXd>& exposure,
+    const Eigen::Ref<const VectorXd>& mediator,
+    const Eigen::Ref<const VectorXd>& outcome,
+    GlmFamily fam_m,
+    GlmFamily fam_y,
+    int n,
+    const Eigen::Ref<const VectorXd>& weights_obs,
+    bool replace_outcome_,
+    BootstrapResult* t0_out) {
+    Rcpp::RNGScope rng_scope;
+
+    std::vector<BootstrapResult> results;
+    results.reserve(nrep);
+
+    const double weight_sum = weights_obs.sum();
+    if (!(weight_sum > 0.0) || !std::isfinite(weight_sum)) {
+        throw std::runtime_error("perform_bootstrap_resample_mediation: non-positive weight sum");
+    }
+
+    Rcpp::Environment base_env = Rcpp::Environment::base_env();
+    Rcpp::Function sample_int = base_env["sample.int"];
+    Rcpp::IntegerVector all_idx =
+        sample_int(Rcpp::Named("n") = n,
+                   Rcpp::Named("size") = static_cast<int>(nrep) * n,
+                   Rcpp::Named("replace") = true);
+
+    VectorXd off_m = VectorXd::Zero(n);
+    VectorXd off_y = VectorXd::Zero(n);
+
+    VectorXd boot_exposure(n);
+    VectorXd boot_mediator(n);
+    VectorXd boot_outcome(n);
+    VectorXd boot_weights(n);
+
+    MatrixXd X_med_boot(n, 2);
+    MatrixXd X_out_boot(n, 3);
+
+    auto simulate_medfun = [&](const VectorXd& bm,
+                               const VectorXd& by,
+                               double sigma2_m) -> BootstrapResult {
+        const double eta_m1 = bm[0] + bm[1] * treat_value;
+        const double eta_m0 = bm[0] + bm[1] * control_value;
+
+        const double mu_m1 = linkinv(eta_m1, fam_m);
+        const double mu_m0 = linkinv(eta_m0, fam_m);
+
+        VectorXd M1(n);
+        VectorXd M0(n);
+
+        if (fam_m == GlmFamily::Gaussian) {
+            const double sd = std::sqrt(std::max(0.0, sigma2_m));
+            Rcpp::NumericVector err = Rcpp::rnorm(n, 0.0, sd);
+            for (int i = 0; i < n; ++i) {
+                const double e = err[i];
+                M1[i] = mu_m1 + e;
+                M0[i] = mu_m0 + e;
+            }
+        } else if (fam_m == GlmFamily::Binomial) {
+            Rcpp::Environment stats_env = Rcpp::Environment::namespace_env("stats");
+            Rcpp::Function rbinom = stats_env["rbinom"];
+            Rcpp::NumericVector draws1 =
+                rbinom(Rcpp::Named("n") = n,
+                       Rcpp::Named("size") = 1.0,
+                       Rcpp::Named("prob") = mu_m1);
+            Rcpp::NumericVector draws0 =
+                rbinom(Rcpp::Named("n") = n,
+                       Rcpp::Named("size") = 1.0,
+                       Rcpp::Named("prob") = mu_m0);
+            for (int i = 0; i < n; ++i) {
+                M1[i] = draws1[i];
+                M0[i] = draws0[i];
+            }
+        } else {  // Poisson
+            Rcpp::Environment stats_env = Rcpp::Environment::namespace_env("stats");
+            Rcpp::Function rpois = stats_env["rpois"];
+            Rcpp::NumericVector draws1 =
+                rpois(Rcpp::Named("n") = n,
+                      Rcpp::Named("lambda") = mu_m1);
+            Rcpp::NumericVector draws0 =
+                rpois(Rcpp::Named("n") = n,
+                      Rcpp::Named("lambda") = mu_m0);
+            for (int i = 0; i < n; ++i) {
+                M1[i] = draws1[i];
+                M0[i] = draws0[i];
+            }
+        }
+
+        double sum_e1 = 0.0;
+        double sum_e2 = 0.0;
+        double sum_e3 = 0.0;
+        double sum_e4 = 0.0;
+
+        for (int i = 0; i < n; ++i) {
+            const double wi = weights_obs[i];
+            const double M1_i = M1[i];
+            const double M0_i = M0[i];
+
+            const double eta00 = by[0] + by[1] * M0_i + by[2] * control_value;
+            const double eta01 = by[0] + by[1] * M1_i + by[2] * control_value;
+            const double eta10 = by[0] + by[1] * M0_i + by[2] * treat_value;
+            const double eta11 = by[0] + by[1] * M1_i + by[2] * treat_value;
+
+            double y00 = linkinv(eta00, fam_y);
+            double y01 = linkinv(eta01, fam_y);
+            double y10 = linkinv(eta10, fam_y);
+            double y11 = linkinv(eta11, fam_y);
+
+            if (replace_outcome_) {
+                const double xi = exposure[i];
+                if (std::fabs(xi - control_value) < 1e-12) {
+                    y00 = outcome[i];
+                }
+                if (std::fabs(xi - treat_value) < 1e-12) {
+                    y11 = outcome[i];
+                }
+            }
+
+            sum_e1 += wi * (y11 - y10);
+            sum_e2 += wi * (y01 - y00);
+            sum_e3 += wi * (y11 - y01);
+            sum_e4 += wi * (y10 - y00);
+        }
+
+        const double d1 = sum_e1 / weight_sum;
+        const double d0 = sum_e2 / weight_sum;
+        const double z1 = sum_e3 / weight_sum;
+        const double z0 = sum_e4 / weight_sum;
+        const double tau = 0.5 * (d1 + d0 + z1 + z0);
+
+        return {d0, d1, z0, z1, tau};
+    };
+
+    for (int rep_idx = 0; rep_idx < nrep; ++rep_idx) {
+        for (int j = 0; j < n; ++j) {
+            const int raw = all_idx[rep_idx + j * nrep];
+            const int sample_idx = raw - 1;
+            boot_exposure[j] = exposure[sample_idx];
+            boot_mediator[j] = mediator[sample_idx];
+            boot_outcome[j] = outcome[sample_idx];
+            boot_weights[j] = weights_obs[sample_idx];
+        }
+
+        X_med_boot.col(0).setOnes();
+        X_med_boot.col(1) = boot_exposure;
+
+        X_out_boot.col(0).setOnes();
+        X_out_boot.col(1) = boot_mediator;
+        X_out_boot.col(2) = boot_exposure;
+
+        const int glm_maxit = 25;
+        const double glm_epsilon = 1e-8;
+        const double glm_qr_tol = 1e-12;
+
+        GlmFit fit_m_boot =
+            glm_fit_irls_qr(X_med_boot,
+                            boot_mediator,
+                            fam_m,
+                            boot_weights,
+                            off_m,
+                            glm_maxit, glm_epsilon, glm_qr_tol);
+        GlmFit fit_y_boot =
+            glm_fit_irls_qr(X_out_boot,
+                            boot_outcome,
+                            fam_y,
+                            boot_weights,
+                            off_y,
+                            glm_maxit, glm_epsilon, glm_qr_tol);
+
+        const double sigma2_m =
+            (fam_m == GlmFamily::Gaussian) ? fit_m_boot.dispersion : 1.0;
+        results.push_back(simulate_medfun(fit_m_boot.coef, fit_y_boot.coef, sigma2_m));
+    }
+
+    if (t0_out) {
+        const double sigma2_m = (fam_m == GlmFamily::Gaussian) ? fit_m.dispersion : 1.0;
+        *t0_out = simulate_medfun(fit_m.coef, fit_y.coef, sigma2_m);
     }
 
     return results;
