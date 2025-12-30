@@ -222,11 +222,7 @@ mediation_analysis <- function(data,
   storage.mode(data_mat) <- "double"
 
   # Set number of threads for RcppParallel
-  if (match_mediation) {
-    RcppParallel::setThreadOptions(numThreads = 1L)
-  } else {
-    RcppParallel::setThreadOptions(numThreads = num_threads)
-  }
+  RcppParallel::setThreadOptions(numThreads = num_threads)
 
   if (!is.null(seed)) {
     if (!is.numeric(seed) || length(seed) != 1 || is.na(seed) || !is.finite(seed)) {

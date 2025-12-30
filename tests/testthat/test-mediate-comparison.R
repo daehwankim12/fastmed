@@ -454,6 +454,59 @@ test_that("fastmed roughly matches mediation::mediate() for Poisson/Poisson (asy
   check_effect("tau", fast, med_result$tau.coef, med_result$tau.ci, med_result$tau.p)
 })
 
+test_that("fastmed matches mediation::mediate() for Poisson/Poisson with large mediator lambda (asymptotic)", {
+  skip_if_not_installed("mediation")
+
+  set.seed(913)
+  n <- 400
+  T <- stats::rbinom(n, 1, 0.5)
+  lambda_M <- exp(3.0 + 0.4 * T) # >= ~20
+  M <- stats::rpois(n, lambda_M)
+  lambda_Y <- exp(0.2 + 0.03 * M + 0.4 * T)
+  Y <- stats::rpois(n, lambda_Y)
+  data <- data.frame(T = T, M = M, Y = Y)
+
+  sims <- 200
+
+  med_model <- stats::glm(M ~ T, family = stats::poisson(), data = data)
+  out_model <- stats::glm(Y ~ M + T, family = stats::poisson(), data = data)
+
+  set.seed(42)
+  mediate_args <- list(
+    model.m = med_model,
+    model.y = out_model,
+    treat = "T",
+    mediator = "M",
+    sims = sims,
+    boot = FALSE
+  )
+  mediate_formals <- names(formals(mediation::mediate))
+  if ("treat.value" %in% mediate_formals) mediate_args$treat.value <- 1
+  if ("control.value" %in% mediate_formals) mediate_args$control.value <- 0
+  med_result <- do.call(mediation::mediate, mediate_args)
+
+  output_csv <- withr::local_tempfile(fileext = ".csv")
+  mediation_analysis(
+    data = data,
+    columns = list(exposure = "T", mediator = "M", outcome = "Y"),
+    nrep = sims,
+    output_file = output_csv,
+    num_threads = 1,
+    pert = "asymptotic",
+    seed = 42,
+    mediator.family = "poisson",
+    outcome.family = "poisson"
+  )
+  fast <- data.table::fread(output_csv)
+  expect_equal(nrow(fast), 1)
+
+  check_effect("d0", fast, med_result$d0, med_result$d0.ci, med_result$d0.p)
+  check_effect("d1", fast, med_result$d1, med_result$d1.ci, med_result$d1.p)
+  check_effect("z0", fast, med_result$z0, med_result$z0.ci, med_result$z0.p)
+  check_effect("z1", fast, med_result$z1, med_result$z1.ci, med_result$z1.p)
+  check_effect("tau", fast, med_result$tau.coef, med_result$tau.ci, med_result$tau.p)
+})
+
 test_that("fastmed roughly matches mediation::mediate() for Gaussian/Poisson (asymptotic)", {
   skip_if_not_installed("mediation")
 

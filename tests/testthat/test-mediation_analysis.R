@@ -304,6 +304,48 @@ test_that("results identical across thread counts with same seed", {
   expect_equal(results1$Combination, results2$Combination)
 })
 
+test_that("bootstrap results identical across thread counts with same seed", {
+  set.seed(123)
+  test_data <- data.table::data.table(
+    EXP1 = rnorm(120),
+    EXP2 = rnorm(120),
+    MED1 = rnorm(120),
+    OUT1 = rnorm(120)
+  )
+
+  output_csv1 <- withr::local_tempfile(fileext = ".csv")
+  output_csv2 <- withr::local_tempfile(fileext = ".csv")
+
+  mediation_analysis(
+    data = test_data,
+    columns = list(exposure = c("EXP"), mediator = c("MED"), outcome = c("OUT")),
+    nrep = 30,
+    output_file = output_csv1,
+    num_threads = 1,
+    pert = "bootstrap",
+    seed = 7
+  )
+
+  mediation_analysis(
+    data = test_data,
+    columns = list(exposure = c("EXP"), mediator = c("MED"), outcome = c("OUT")),
+    nrep = 30,
+    output_file = output_csv2,
+    num_threads = 4,
+    pert = "bootstrap",
+    seed = 7
+  )
+
+  results1 <- data.table::fread(output_csv1)
+  results2 <- data.table::fread(output_csv2)
+
+  numeric_cols <- names(results1)[vapply(results1, is.numeric, logical(1))]
+  for (col in numeric_cols) {
+    expect_equal(results1[[col]], results2[[col]], tolerance = 1e-10)
+  }
+  expect_equal(results1$Combination, results2$Combination)
+})
+
 test_that("CSV escaping handles special characters in Combination", {
   set.seed(123)
   test_data <- data.table::data.table(
