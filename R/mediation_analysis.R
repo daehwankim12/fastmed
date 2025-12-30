@@ -243,6 +243,10 @@ mediation_analysis <- function(data,
     base_seed <- sample.int(.Machine$integer.max, 1)
   }
 
+  if (match_mediation) {
+    set.seed(base_seed)
+  }
+
   overwrite <- isTRUE(overwrite)
   excel_safe_csv <- isTRUE(excel_safe_csv)
 

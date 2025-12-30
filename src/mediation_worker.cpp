@@ -5,6 +5,8 @@
 #include "fastmed_rng.h"
 #include "fastmed_stats.h"
 
+#include <R_ext/Random.h>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -16,6 +18,94 @@ using Eigen::MatrixXd;
 using Eigen::VectorXd;
 
 namespace {
+inline double linkinv_mediation(double eta, GlmFamily fam) {
+    if (fam == GlmFamily::Gaussian) {
+        return eta;
+    }
+    if (fam == GlmFamily::Binomial) {
+        return inv_logit(eta);
+    }
+    return std::exp(eta);
+}
+
+inline double rbinom1_unif(double p) {
+    if (!(p > 0.0)) {
+        return 0.0;
+    }
+    if (!(p < 1.0)) {
+        return 1.0;
+    }
+
+    const double u = unif_rand();
+    if (p <= 0.5) {
+        return (u > (1.0 - p)) ? 1.0 : 0.0;
+    }
+    return (u < p) ? 1.0 : 0.0;
+}
+
+inline double rpois_inversion(double lambda) {
+    if (!(lambda > 0.0)) {
+        return 0.0;
+    }
+
+    const double u = unif_rand();
+    double p = std::exp(-lambda);
+    double s = p;
+    int k = 0;
+    while (u > s) {
+        ++k;
+        p *= lambda / static_cast<double>(k);
+        s += p;
+    }
+    return static_cast<double>(k);
+}
+
+inline double rpois_ptrs(double lambda) {
+    if (!(lambda > 0.0)) {
+        return 0.0;
+    }
+
+    const double sq = std::sqrt(lambda);
+    const double b = 0.931 + 2.53 * sq;
+    const double a = -0.059 + 0.02483 * b;
+    const double inv_alpha = 1.1239 + 1.1328 / (b - 3.4);
+    const double v_r = 0.9277 - 3.6224 / (b - 2.0);
+    const double log_lambda = std::log(lambda);
+
+    while (true) {
+        const double u = unif_rand() - 0.5;
+        const double v = unif_rand();
+        const double us = 0.5 - std::fabs(u);
+        const double k = std::floor((2.0 * a / us + b) * u + lambda + 0.43);
+
+        if (us >= 0.07 && v <= v_r) {
+            return k;
+        }
+        if (k < 0.0 || (us < 0.013 && v > us)) {
+            continue;
+        }
+
+        const double lhs =
+            std::log(v) + std::log(inv_alpha) - std::log(a / (us * us) + b);
+        const double rhs =
+            -lambda + k * log_lambda - std::lgamma(k + 1.0);
+        if (lhs <= rhs) {
+            return k;
+        }
+    }
+}
+
+inline double rpois_unif(double lambda) {
+    // R's rpois() uses inversion for lambda < 10; mirror that since it keeps the
+    // RNG stream aligned with mediation::mediate() for typical mediation-scale
+    // means. For larger lambda, fall back to PTRS (fast, accurate) while
+    // avoiding calls into R's Poisson RNG helpers.
+    if (lambda < 10.0) {
+        return rpois_inversion(lambda);
+    }
+    return rpois_ptrs(lambda);
+}
+
 MatrixXd cholesky_lower_or_throw(MatrixXd cov, const std::string& context) {
     cov = 0.5 * (cov + cov.transpose());
     Eigen::LLT<MatrixXd> chol(cov);
@@ -26,41 +116,30 @@ MatrixXd cholesky_lower_or_throw(MatrixXd cov, const std::string& context) {
     if (!L.allFinite() || (L.diagonal().array() <= 0.0).any()) {
         throw std::runtime_error("Cholesky decomposition failed for " + context);
     }
-    return L;
-}
+	    return L;
+	}
 
-MatrixXd sqrtm_eigen_or_throw(const MatrixXd& cov, const std::string& context) {
-    if (cov.rows() != cov.cols()) {
-        throw std::runtime_error("sqrtm_eigen_or_throw: non-square cov for " + context);
-    }
-    MatrixXd cov_sym = 0.5 * (cov + cov.transpose());
+	MatrixXd sqrtm_eigen_or_throw(const MatrixXd& cov, const std::string& context) {
+	    if (cov.rows() != cov.cols()) {
+	        throw std::runtime_error("sqrtm_eigen_or_throw: non-square cov for " + context);
+	    }
+	    MatrixXd cov_sym = 0.5 * (cov + cov.transpose());
 
-    Rcpp::Environment base_env = Rcpp::Environment::base_env();
-    Rcpp::Function eigen = base_env["eigen"];
-    Rcpp::List ev = eigen(Rcpp::wrap(cov_sym),
-                          Rcpp::Named("symmetric") = true,
-                          Rcpp::Named("only.values") = false);
+	    Eigen::SelfAdjointEigenSolver<MatrixXd> solver(cov_sym);
+	    if (solver.info() != Eigen::Success) {
+	        throw std::runtime_error("sqrtm_eigen_or_throw: eigen decomposition failed for " +
+	                                 context);
+	    }
 
-    Rcpp::NumericVector values = ev["values"];
-    Rcpp::NumericMatrix vectors = ev["vectors"];
-    if (vectors.nrow() != cov_sym.rows() || vectors.ncol() != cov_sym.cols()) {
-        throw std::runtime_error("sqrtm_eigen_or_throw: eigen dimension mismatch for " + context);
-    }
-
-    const int p = cov_sym.rows();
-    Eigen::Map<const MatrixXd> V(vectors.begin(), p, p);
-    VectorXd sqrt_vals(p);
-    for (int i = 0; i < p; ++i) {
-        const double v = values[i];
-        sqrt_vals[i] = std::sqrt(std::max(0.0, v));
-    }
-
-    MatrixXd R = V * sqrt_vals.asDiagonal() * V.transpose();
-    if (!R.allFinite()) {
-        throw std::runtime_error("sqrtm_eigen_or_throw: non-finite sqrt cov for " + context);
-    }
-    return R;
-}
+	    const VectorXd values = solver.eigenvalues();
+	    const MatrixXd vectors = solver.eigenvectors();
+	    const VectorXd sqrt_vals = values.array().max(0.0).sqrt().matrix();
+	    MatrixXd R = vectors * sqrt_vals.asDiagonal() * vectors.transpose();
+	    if (!R.allFinite()) {
+	        throw std::runtime_error("sqrtm_eigen_or_throw: non-finite sqrt cov for " + context);
+	    }
+	    return R;
+	}
 
 MatrixXd rmvnorm_eigen(int n, const VectorXd& mean, const MatrixXd& sigma, const std::string& context) {
     if (n <= 0) {
@@ -74,21 +153,18 @@ MatrixXd rmvnorm_eigen(int n, const VectorXd& mean, const MatrixXd& sigma, const
         throw std::runtime_error("rmvnorm_eigen: mean/sigma size mismatch for " + context);
     }
 
-    const MatrixXd R = sqrtm_eigen_or_throw(sigma, context);
+	    const MatrixXd R = sqrtm_eigen_or_throw(sigma, context);
+	    MatrixXd out(n, p);
+	    for (int i = 0; i < n; ++i) {
+	        for (int j = 0; j < p; ++j) {
+	            out(i, j) = norm_rand();
+	        }
+	    }
 
-    Rcpp::NumericVector z = Rcpp::rnorm(n * p);
-    MatrixXd out(n, p);
-    int idx = 0;
-    for (int i = 0; i < n; ++i) {
-        for (int j = 0; j < p; ++j) {
-            out(i, j) = z[idx++];
-        }
-    }
-
-    out = out * R;
-    out.rowwise() += mean.transpose();
-    return out;
-}
+	    out = out * R;
+	    out.rowwise() += mean.transpose();
+	    return out;
+	}
 }  // namespace
 
 MediationWorker::MediationWorker(const Eigen::Map<const MatrixXd>& data_,
@@ -353,8 +429,8 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_asymptotic_media
     for (int s = 0; s < nrep; ++s) {
         const double eta1 = MModel(s, 0) + MModel(s, 1) * treat_value;
         const double eta0 = MModel(s, 0) + MModel(s, 1) * control_value;
-        mu_m1[s] = linkinv(eta1, fam_m);
-        mu_m0[s] = linkinv(eta0, fam_m);
+        mu_m1[s] = linkinv_mediation(eta1, fam_m);
+        mu_m0[s] = linkinv_mediation(eta0, fam_m);
     }
 
     MatrixXd M1(nrep, n);
@@ -362,8 +438,12 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_asymptotic_media
 
     if (fam_m == GlmFamily::Gaussian) {
         const double sd = std::sqrt(std::max(0.0, fit_m.dispersion));
-        Rcpp::NumericVector err = Rcpp::rnorm(static_cast<int>(nrep) * n, 0.0, sd);
-        Eigen::Map<const MatrixXd> E(err.begin(), nrep, n);
+        MatrixXd E(nrep, n);
+        for (int j = 0; j < n; ++j) {
+            for (int s = 0; s < nrep; ++s) {
+                E(s, j) = sd * norm_rand();
+            }
+        }
 
         for (int j = 0; j < n; ++j) {
             M1.col(j) = mu_m1;
@@ -372,55 +452,27 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_asymptotic_media
         M1 += E;
         M0 += E;
     } else if (fam_m == GlmFamily::Binomial) {
-        Rcpp::NumericVector prob1(static_cast<int>(nrep) * n);
-        Rcpp::NumericVector prob0(static_cast<int>(nrep) * n);
         for (int j = 0; j < n; ++j) {
-            const int base = j * nrep;
             for (int s = 0; s < nrep; ++s) {
-                prob1[base + s] = mu_m1[s];
-                prob0[base + s] = mu_m0[s];
+                M1(s, j) = rbinom1_unif(mu_m1[s]);
             }
         }
-
-        Rcpp::Environment stats_env = Rcpp::Environment::namespace_env("stats");
-        Rcpp::Function rbinom = stats_env["rbinom"];
-        Rcpp::NumericVector draws1 =
-            rbinom(Rcpp::Named("n") = static_cast<int>(nrep) * n,
-                   Rcpp::Named("size") = 1.0,
-                   Rcpp::Named("prob") = prob1);
-        Rcpp::NumericVector draws0 =
-            rbinom(Rcpp::Named("n") = static_cast<int>(nrep) * n,
-                   Rcpp::Named("size") = 1.0,
-                   Rcpp::Named("prob") = prob0);
-
-        Eigen::Map<const MatrixXd> M1_map(draws1.begin(), nrep, n);
-        Eigen::Map<const MatrixXd> M0_map(draws0.begin(), nrep, n);
-        M1 = M1_map;
-        M0 = M0_map;
+        for (int j = 0; j < n; ++j) {
+            for (int s = 0; s < nrep; ++s) {
+                M0(s, j) = rbinom1_unif(mu_m0[s]);
+            }
+        }
     } else {  // Poisson
-        Rcpp::NumericVector lambda1(static_cast<int>(nrep) * n);
-        Rcpp::NumericVector lambda0(static_cast<int>(nrep) * n);
         for (int j = 0; j < n; ++j) {
-            const int base = j * nrep;
             for (int s = 0; s < nrep; ++s) {
-                lambda1[base + s] = mu_m1[s];
-                lambda0[base + s] = mu_m0[s];
+                M1(s, j) = rpois_unif(mu_m1[s]);
             }
         }
-
-        Rcpp::Environment stats_env = Rcpp::Environment::namespace_env("stats");
-        Rcpp::Function rpois = stats_env["rpois"];
-        Rcpp::NumericVector draws1 =
-            rpois(Rcpp::Named("n") = static_cast<int>(nrep) * n,
-                  Rcpp::Named("lambda") = lambda1);
-        Rcpp::NumericVector draws0 =
-            rpois(Rcpp::Named("n") = static_cast<int>(nrep) * n,
-                  Rcpp::Named("lambda") = lambda0);
-
-        Eigen::Map<const MatrixXd> M1_map(draws1.begin(), nrep, n);
-        Eigen::Map<const MatrixXd> M0_map(draws0.begin(), nrep, n);
-        M1 = M1_map;
-        M0 = M0_map;
+        for (int j = 0; j < n; ++j) {
+            for (int s = 0; s < nrep; ++s) {
+                M0(s, j) = rpois_unif(mu_m0[s]);
+            }
+        }
     }
 
     const double weight_sum = weights.sum();
@@ -447,10 +499,10 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_asymptotic_media
             const double eta10 = by0 + by1 * M0_i + by2 * treat_value;
             const double eta11 = by0 + by1 * M1_i + by2 * treat_value;
 
-            double y00 = linkinv(eta00, fam_y);
-            double y01 = linkinv(eta01, fam_y);
-            double y10 = linkinv(eta10, fam_y);
-            double y11 = linkinv(eta11, fam_y);
+            double y00 = linkinv_mediation(eta00, fam_y);
+            double y01 = linkinv_mediation(eta01, fam_y);
+            double y10 = linkinv_mediation(eta10, fam_y);
+            double y11 = linkinv_mediation(eta11, fam_y);
 
             if (replace_outcome_) {
                 const double xi = exposure_obs[i];
@@ -629,12 +681,13 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_resample_mediati
         throw std::runtime_error("perform_bootstrap_resample_mediation: non-positive weight sum");
     }
 
-    Rcpp::Environment base_env = Rcpp::Environment::base_env();
-    Rcpp::Function sample_int = base_env["sample.int"];
-    Rcpp::IntegerVector all_idx =
-        sample_int(Rcpp::Named("n") = n,
-                   Rcpp::Named("size") = static_cast<int>(nrep) * n,
-                   Rcpp::Named("replace") = true);
+    std::vector<int> all_idx(static_cast<size_t>(nrep) * static_cast<size_t>(n));
+    for (int j = 0; j < n; ++j) {
+        for (int rep_idx = 0; rep_idx < nrep; ++rep_idx) {
+            all_idx[static_cast<size_t>(rep_idx) + static_cast<size_t>(j) * nrep] =
+                static_cast<int>(R_unif_index(static_cast<double>(n)));
+        }
+    }
 
     VectorXd off_m = VectorXd::Zero(n);
     VectorXd off_y = VectorXd::Zero(n);
@@ -653,47 +706,28 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_resample_mediati
         const double eta_m1 = bm[0] + bm[1] * treat_value;
         const double eta_m0 = bm[0] + bm[1] * control_value;
 
-        const double mu_m1 = linkinv(eta_m1, fam_m);
-        const double mu_m0 = linkinv(eta_m0, fam_m);
+        const double mu_m1 = linkinv_mediation(eta_m1, fam_m);
+        const double mu_m0 = linkinv_mediation(eta_m0, fam_m);
 
         VectorXd M1(n);
         VectorXd M0(n);
 
         if (fam_m == GlmFamily::Gaussian) {
             const double sd = std::sqrt(std::max(0.0, sigma2_m));
-            Rcpp::NumericVector err = Rcpp::rnorm(n, 0.0, sd);
             for (int i = 0; i < n; ++i) {
-                const double e = err[i];
+                const double e = sd * norm_rand();
                 M1[i] = mu_m1 + e;
                 M0[i] = mu_m0 + e;
             }
         } else if (fam_m == GlmFamily::Binomial) {
-            Rcpp::Environment stats_env = Rcpp::Environment::namespace_env("stats");
-            Rcpp::Function rbinom = stats_env["rbinom"];
-            Rcpp::NumericVector draws1 =
-                rbinom(Rcpp::Named("n") = n,
-                       Rcpp::Named("size") = 1.0,
-                       Rcpp::Named("prob") = mu_m1);
-            Rcpp::NumericVector draws0 =
-                rbinom(Rcpp::Named("n") = n,
-                       Rcpp::Named("size") = 1.0,
-                       Rcpp::Named("prob") = mu_m0);
             for (int i = 0; i < n; ++i) {
-                M1[i] = draws1[i];
-                M0[i] = draws0[i];
+                M1[i] = rbinom1_unif(mu_m1);
+                M0[i] = rbinom1_unif(mu_m0);
             }
         } else {  // Poisson
-            Rcpp::Environment stats_env = Rcpp::Environment::namespace_env("stats");
-            Rcpp::Function rpois = stats_env["rpois"];
-            Rcpp::NumericVector draws1 =
-                rpois(Rcpp::Named("n") = n,
-                      Rcpp::Named("lambda") = mu_m1);
-            Rcpp::NumericVector draws0 =
-                rpois(Rcpp::Named("n") = n,
-                      Rcpp::Named("lambda") = mu_m0);
             for (int i = 0; i < n; ++i) {
-                M1[i] = draws1[i];
-                M0[i] = draws0[i];
+                M1[i] = rpois_unif(mu_m1);
+                M0[i] = rpois_unif(mu_m0);
             }
         }
 
@@ -712,10 +746,10 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_resample_mediati
             const double eta10 = by[0] + by[1] * M0_i + by[2] * treat_value;
             const double eta11 = by[0] + by[1] * M1_i + by[2] * treat_value;
 
-            double y00 = linkinv(eta00, fam_y);
-            double y01 = linkinv(eta01, fam_y);
-            double y10 = linkinv(eta10, fam_y);
-            double y11 = linkinv(eta11, fam_y);
+            double y00 = linkinv_mediation(eta00, fam_y);
+            double y01 = linkinv_mediation(eta01, fam_y);
+            double y10 = linkinv_mediation(eta10, fam_y);
+            double y11 = linkinv_mediation(eta11, fam_y);
 
             if (replace_outcome_) {
                 const double xi = exposure[i];
@@ -742,10 +776,14 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_resample_mediati
         return {d0, d1, z0, z1, tau};
     };
 
+    if (t0_out) {
+        const double sigma2_m = (fam_m == GlmFamily::Gaussian) ? fit_m.dispersion : 1.0;
+        *t0_out = simulate_medfun(fit_m.coef, fit_y.coef, sigma2_m);
+    }
+
     for (int rep_idx = 0; rep_idx < nrep; ++rep_idx) {
         for (int j = 0; j < n; ++j) {
-            const int raw = all_idx[rep_idx + j * nrep];
-            const int sample_idx = raw - 1;
+            const int sample_idx = all_idx[static_cast<size_t>(rep_idx) + static_cast<size_t>(j) * nrep];
             boot_exposure[j] = exposure[sample_idx];
             boot_mediator[j] = mediator[sample_idx];
             boot_outcome[j] = outcome[sample_idx];
@@ -781,11 +819,6 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_resample_mediati
         const double sigma2_m =
             (fam_m == GlmFamily::Gaussian) ? fit_m_boot.dispersion : 1.0;
         results.push_back(simulate_medfun(fit_m_boot.coef, fit_y_boot.coef, sigma2_m));
-    }
-
-    if (t0_out) {
-        const double sigma2_m = (fam_m == GlmFamily::Gaussian) ? fit_m.dispersion : 1.0;
-        *t0_out = simulate_medfun(fit_m.coef, fit_y.coef, sigma2_m);
     }
 
     return results;

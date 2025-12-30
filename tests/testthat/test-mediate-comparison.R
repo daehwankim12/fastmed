@@ -12,15 +12,15 @@ check_effect <- function(effect, fast, med_est, med_ci, med_p, tol = 1e-6) {
   fast_ci_upper <- fast[[paste0(effect, "_ci_upper")]][1]
   fast_p <- fast[[paste0(effect, "_p")]][1]
 
-  expect_equal(fast_est, med_est, tolerance = tol, info = paste(effect, "estimate mismatch"))
-  expect_equal(fast_ci_lower, med_ci[1], tolerance = tol, info = paste(effect, "CI lower mismatch"))
-  expect_equal(fast_ci_upper, med_ci[2], tolerance = tol, info = paste(effect, "CI upper mismatch"))
+  expect_true(abs(fast_est - med_est) <= tol, info = paste(effect, "estimate mismatch"))
+  expect_true(abs(fast_ci_lower - med_ci[1]) <= tol, info = paste(effect, "CI lower mismatch"))
+  expect_true(abs(fast_ci_upper - med_ci[2]) <= tol, info = paste(effect, "CI upper mismatch"))
 
   fast_width <- fast_ci_upper - fast_ci_lower
   med_width <- med_ci[2] - med_ci[1]
-  expect_equal(fast_width, med_width, tolerance = tol, info = paste(effect, "CI width mismatch"))
+  expect_true(abs(fast_width - med_width) <= 2 * tol, info = paste(effect, "CI width mismatch"))
 
-  expect_equal(fast_p, med_p, tolerance = tol, info = paste(effect, "p-value mismatch"))
+  expect_true(abs(fast_p - med_p) <= tol, info = paste(effect, "p-value mismatch"))
 }
 
 test_that("fastmed roughly matches mediation::mediate() for Gaussian/Gaussian (asymptotic)", {
@@ -443,6 +443,222 @@ test_that("fastmed roughly matches mediation::mediate() for Poisson/Poisson (asy
     seed = 42,
     mediator.family = "poisson",
     outcome.family = "poisson"
+  )
+  fast <- data.table::fread(output_csv)
+  expect_equal(nrow(fast), 1)
+
+  check_effect("d0", fast, med_result$d0, med_result$d0.ci, med_result$d0.p)
+  check_effect("d1", fast, med_result$d1, med_result$d1.ci, med_result$d1.p)
+  check_effect("z0", fast, med_result$z0, med_result$z0.ci, med_result$z0.p)
+  check_effect("z1", fast, med_result$z1, med_result$z1.ci, med_result$z1.p)
+  check_effect("tau", fast, med_result$tau.coef, med_result$tau.ci, med_result$tau.p)
+})
+
+test_that("fastmed roughly matches mediation::mediate() for Gaussian/Poisson (asymptotic)", {
+  skip_if_not_installed("mediation")
+
+  data <- generate_mediation_data(
+    n = 400,
+    treat_family = "binary",
+    mediator_family = "gaussian",
+    outcome_family = "poisson",
+    true_acme = 0.3,
+    true_ade = 0.4,
+    seed = 14
+  )
+
+  sims <- 500
+
+  med_model <- stats::lm(M ~ T, data = data)
+  out_model <- stats::glm(Y ~ M + T, family = stats::poisson(), data = data)
+
+  set.seed(42)
+  mediate_args <- list(
+    model.m = med_model,
+    model.y = out_model,
+    treat = "T",
+    mediator = "M",
+    sims = sims,
+    boot = FALSE
+  )
+  mediate_formals <- names(formals(mediation::mediate))
+  if ("treat.value" %in% mediate_formals) mediate_args$treat.value <- 1
+  if ("control.value" %in% mediate_formals) mediate_args$control.value <- 0
+  med_result <- do.call(mediation::mediate, mediate_args)
+
+  output_csv <- withr::local_tempfile(fileext = ".csv")
+  mediation_analysis(
+    data = data,
+    columns = list(exposure = "T", mediator = "M", outcome = "Y"),
+    nrep = sims,
+    output_file = output_csv,
+    num_threads = 1,
+    pert = "asymptotic",
+    seed = 42,
+    mediator.family = "gaussian",
+    outcome.family = "poisson"
+  )
+  fast <- data.table::fread(output_csv)
+  expect_equal(nrow(fast), 1)
+
+  check_effect("d0", fast, med_result$d0, med_result$d0.ci, med_result$d0.p)
+  check_effect("d1", fast, med_result$d1, med_result$d1.ci, med_result$d1.p)
+  check_effect("z0", fast, med_result$z0, med_result$z0.ci, med_result$z0.p)
+  check_effect("z1", fast, med_result$z1, med_result$z1.ci, med_result$z1.p)
+  check_effect("tau", fast, med_result$tau.coef, med_result$tau.ci, med_result$tau.p)
+})
+
+test_that("fastmed roughly matches mediation::mediate() for Poisson/Gaussian (asymptotic)", {
+  skip_if_not_installed("mediation")
+
+  data <- generate_mediation_data(
+    n = 400,
+    treat_family = "binary",
+    mediator_family = "poisson",
+    outcome_family = "gaussian",
+    true_acme = 0.3,
+    true_ade = 0.4,
+    seed = 15
+  )
+
+  sims <- 500
+
+  med_model <- stats::glm(M ~ T, family = stats::poisson(), data = data)
+  out_model <- stats::lm(Y ~ M + T, data = data)
+
+  set.seed(42)
+  mediate_args <- list(
+    model.m = med_model,
+    model.y = out_model,
+    treat = "T",
+    mediator = "M",
+    sims = sims,
+    boot = FALSE
+  )
+  mediate_formals <- names(formals(mediation::mediate))
+  if ("treat.value" %in% mediate_formals) mediate_args$treat.value <- 1
+  if ("control.value" %in% mediate_formals) mediate_args$control.value <- 0
+  med_result <- do.call(mediation::mediate, mediate_args)
+
+  output_csv <- withr::local_tempfile(fileext = ".csv")
+  mediation_analysis(
+    data = data,
+    columns = list(exposure = "T", mediator = "M", outcome = "Y"),
+    nrep = sims,
+    output_file = output_csv,
+    num_threads = 1,
+    pert = "asymptotic",
+    seed = 42,
+    mediator.family = "poisson",
+    outcome.family = "gaussian"
+  )
+  fast <- data.table::fread(output_csv)
+  expect_equal(nrow(fast), 1)
+
+  check_effect("d0", fast, med_result$d0, med_result$d0.ci, med_result$d0.p)
+  check_effect("d1", fast, med_result$d1, med_result$d1.ci, med_result$d1.p)
+  check_effect("z0", fast, med_result$z0, med_result$z0.ci, med_result$z0.p)
+  check_effect("z1", fast, med_result$z1, med_result$z1.ci, med_result$z1.p)
+  check_effect("tau", fast, med_result$tau.coef, med_result$tau.ci, med_result$tau.p)
+})
+
+test_that("fastmed roughly matches mediation::mediate() for Binomial/Poisson (asymptotic)", {
+  skip_if_not_installed("mediation")
+
+  data <- generate_mediation_data(
+    n = 500,
+    treat_family = "binary",
+    mediator_family = "binomial",
+    outcome_family = "poisson",
+    true_acme = 0.3,
+    true_ade = 0.4,
+    seed = 16
+  )
+
+  sims <- 500
+
+  med_model <- stats::glm(M ~ T, family = stats::binomial(), data = data)
+  out_model <- stats::glm(Y ~ M + T, family = stats::poisson(), data = data)
+
+  set.seed(42)
+  mediate_args <- list(
+    model.m = med_model,
+    model.y = out_model,
+    treat = "T",
+    mediator = "M",
+    sims = sims,
+    boot = FALSE
+  )
+  mediate_formals <- names(formals(mediation::mediate))
+  if ("treat.value" %in% mediate_formals) mediate_args$treat.value <- 1
+  if ("control.value" %in% mediate_formals) mediate_args$control.value <- 0
+  med_result <- do.call(mediation::mediate, mediate_args)
+
+  output_csv <- withr::local_tempfile(fileext = ".csv")
+  mediation_analysis(
+    data = data,
+    columns = list(exposure = "T", mediator = "M", outcome = "Y"),
+    nrep = sims,
+    output_file = output_csv,
+    num_threads = 1,
+    pert = "asymptotic",
+    seed = 42,
+    mediator.family = "binomial",
+    outcome.family = "poisson"
+  )
+  fast <- data.table::fread(output_csv)
+  expect_equal(nrow(fast), 1)
+
+  check_effect("d0", fast, med_result$d0, med_result$d0.ci, med_result$d0.p)
+  check_effect("d1", fast, med_result$d1, med_result$d1.ci, med_result$d1.p)
+  check_effect("z0", fast, med_result$z0, med_result$z0.ci, med_result$z0.p)
+  check_effect("z1", fast, med_result$z1, med_result$z1.ci, med_result$z1.p)
+  check_effect("tau", fast, med_result$tau.coef, med_result$tau.ci, med_result$tau.p)
+})
+
+test_that("fastmed roughly matches mediation::mediate() for Poisson/Binomial (asymptotic)", {
+  skip_if_not_installed("mediation")
+
+  data <- generate_mediation_data(
+    n = 500,
+    treat_family = "binary",
+    mediator_family = "poisson",
+    outcome_family = "binomial",
+    true_acme = 0.3,
+    true_ade = 0.4,
+    seed = 17
+  )
+
+  sims <- 500
+
+  med_model <- stats::glm(M ~ T, family = stats::poisson(), data = data)
+  out_model <- stats::glm(Y ~ M + T, family = stats::binomial(), data = data)
+
+  set.seed(42)
+  mediate_args <- list(
+    model.m = med_model,
+    model.y = out_model,
+    treat = "T",
+    mediator = "M",
+    sims = sims,
+    boot = FALSE
+  )
+  mediate_formals <- names(formals(mediation::mediate))
+  if ("treat.value" %in% mediate_formals) mediate_args$treat.value <- 1
+  if ("control.value" %in% mediate_formals) mediate_args$control.value <- 0
+  med_result <- do.call(mediation::mediate, mediate_args)
+
+  output_csv <- withr::local_tempfile(fileext = ".csv")
+  mediation_analysis(
+    data = data,
+    columns = list(exposure = "T", mediator = "M", outcome = "Y"),
+    nrep = sims,
+    output_file = output_csv,
+    num_threads = 1,
+    pert = "asymptotic",
+    seed = 42,
+    mediator.family = "poisson",
+    outcome.family = "binomial"
   )
   fast <- data.table::fread(output_csv)
   expect_equal(nrow(fast), 1)

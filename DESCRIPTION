@@ -23,6 +23,7 @@ LinkingTo:
     RcppParallel
 Suggests:
     knitr,
+    mediation,
     rmarkdown,
     withr,
     testthat (>= 3.0.0)

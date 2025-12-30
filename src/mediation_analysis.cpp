@@ -224,11 +224,9 @@ void mediation_analysis_cpp(NumericMatrix data,
             throw std::runtime_error("Failed to open output file: " + output_file);
         }
 
-        if (match_mediation) {
-            Rcpp::Environment base_env = Rcpp::Environment::base_env();
-            Rcpp::Function set_seed = base_env["set.seed"];
-            set_seed(static_cast<int>(base_seed));
-        }
+        // When match_mediation is enabled we rely on R's RNG stream. Any seeding
+        // should be handled on the R side (e.g., via set.seed()) prior to
+        // calling into this routine.
 
         const bool legacy_output_schema = [&]() {
             if (output_format == "legacy") {
