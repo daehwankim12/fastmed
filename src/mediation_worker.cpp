@@ -29,6 +29,12 @@ inline double linkinv_mediation(double eta, GlmFamily fam) {
     return std::exp(eta);
 }
 
+inline bool bootstrap_result_finite(const BootstrapResult& r) {
+    return std::isfinite(r.indirect_effect_0) && std::isfinite(r.indirect_effect_1) &&
+           std::isfinite(r.direct_effect_0) && std::isfinite(r.direct_effect_1) &&
+           std::isfinite(r.total_effect);
+}
+
 inline double rbinom1_from_u(double p, double u) {
     if (!(p > 0.0)) {
         return 0.0;
@@ -186,12 +192,12 @@ std::string MediationWorker::process_combination(std::size_t idx,
                                                  MatrixXd& X_out,
                                                  VectorXd& off_m,
                                                  VectorXd& off_y) {
-    const size_t e = exposure_col_idx.size();
     const size_t m = mediator_col_idx.size();
+    const size_t o = outcome_col_idx.size();
 
-    const size_t exp_list_idx = idx % e;
-    const size_t med_list_idx = (idx / e) % m;
-    const size_t out_list_idx = idx / (e * m);
+    const size_t out_list_idx = idx % o;
+    const size_t med_list_idx = (idx / o) % m;
+    const size_t exp_list_idx = idx / (o * m);
 
     const int exp_idx = exposure_col_idx[exp_list_idx];
     const int med_idx = mediator_col_idx[med_list_idx];
@@ -335,6 +341,12 @@ std::string MediationWorker::process_combination(std::size_t idx,
             }
         } else {
             throw std::invalid_argument("Unknown perturbation method: " + pert_method);
+        }
+
+        if (bootstrap_results.empty()) {
+            // In match_mediation bootstrap mode, individual replicates may fail; only
+            // return an NA row if all replicates failed.
+            return format_na_row(exposure_col, mediator_col, outcome_col);
         }
 
         return format_results(exposure_col,
@@ -1025,66 +1037,78 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_resample_mediati
     }
 
     for (int rep_idx = 0; rep_idx < nrep; ++rep_idx) {
-        for (int j = 0; j < n; ++j) {
-            const std::size_t idx_pos =
-                idx_base + static_cast<std::size_t>(rep_idx) +
-                static_cast<std::size_t>(j) * static_cast<std::size_t>(nrep);
-            const int sample_idx = match_rng->bootstrap_indices[idx_pos];
-            boot_exposure[j] = exposure[sample_idx];
-            boot_mediator[j] = mediator[sample_idx];
-            boot_outcome[j] = outcome[sample_idx];
-            boot_weights[j] = weights_obs[sample_idx];
+        try {
+            for (int j = 0; j < n; ++j) {
+                const std::size_t idx_pos =
+                    idx_base + static_cast<std::size_t>(rep_idx) +
+                    static_cast<std::size_t>(j) * static_cast<std::size_t>(nrep);
+                const int sample_idx = match_rng->bootstrap_indices[idx_pos];
+                boot_exposure[j] = exposure[sample_idx];
+                boot_mediator[j] = mediator[sample_idx];
+                boot_outcome[j] = outcome[sample_idx];
+                boot_weights[j] = weights_obs[sample_idx];
+            }
+
+            X_med_boot.col(0).setOnes();
+            X_med_boot.col(1) = boot_exposure;
+
+            X_out_boot.col(0).setOnes();
+            X_out_boot.col(1) = boot_mediator;
+            X_out_boot.col(2) = boot_exposure;
+
+            const int glm_maxit = 25;
+            const double glm_epsilon = 1e-8;
+            const double glm_qr_tol = 1e-12;
+
+            GlmFit fit_m_boot =
+                glm_fit_irls_qr(X_med_boot,
+                                boot_mediator,
+                                fam_m,
+                                boot_weights,
+                                off_m,
+                                glm_maxit,
+                                glm_epsilon,
+                                glm_qr_tol);
+            GlmFit fit_y_boot =
+                glm_fit_irls_qr(X_out_boot,
+                                boot_outcome,
+                                fam_y,
+                                boot_weights,
+                                off_y,
+                                glm_maxit,
+                                glm_epsilon,
+                                glm_qr_tol);
+
+            const double sigma2_m =
+                (fam_m == GlmFamily::Gaussian) ? fit_m_boot.dispersion : 1.0;
+
+            const double* rep_normals = nullptr;
+            const double* rep_uniforms = nullptr;
+            if (fam_m == GlmFamily::Gaussian) {
+                rep_normals = noise_normals + static_cast<std::size_t>(n) +
+                              static_cast<std::size_t>(rep_idx) *
+                                  static_cast<std::size_t>(n);
+            } else {
+                rep_uniforms =
+                    noise_uniforms + static_cast<std::size_t>(2) * static_cast<std::size_t>(n) +
+                    static_cast<std::size_t>(rep_idx) *
+                        static_cast<std::size_t>(2) * static_cast<std::size_t>(n);
+            }
+
+            BootstrapResult rep = simulate_medfun(fit_m_boot.coef,
+                                                  fit_y_boot.coef,
+                                                  sigma2_m,
+                                                  rep_normals,
+                                                  rep_uniforms);
+            if (!bootstrap_result_finite(rep)) {
+                continue;
+            }
+            results.push_back(rep);
+        } catch (const std::exception&) {
+            // mediate-like semantics: allow individual bootstrap replicates to fail
+            // without turning the entire combination into an NA row.
+            continue;
         }
-
-        X_med_boot.col(0).setOnes();
-        X_med_boot.col(1) = boot_exposure;
-
-        X_out_boot.col(0).setOnes();
-        X_out_boot.col(1) = boot_mediator;
-        X_out_boot.col(2) = boot_exposure;
-
-        const int glm_maxit = 25;
-        const double glm_epsilon = 1e-8;
-        const double glm_qr_tol = 1e-12;
-
-        GlmFit fit_m_boot =
-            glm_fit_irls_qr(X_med_boot,
-                            boot_mediator,
-                            fam_m,
-                            boot_weights,
-                            off_m,
-                            glm_maxit,
-                            glm_epsilon,
-                            glm_qr_tol);
-        GlmFit fit_y_boot =
-            glm_fit_irls_qr(X_out_boot,
-                            boot_outcome,
-                            fam_y,
-                            boot_weights,
-                            off_y,
-                            glm_maxit,
-                            glm_epsilon,
-                            glm_qr_tol);
-
-        const double sigma2_m =
-            (fam_m == GlmFamily::Gaussian) ? fit_m_boot.dispersion : 1.0;
-
-        const double* rep_normals = nullptr;
-        const double* rep_uniforms = nullptr;
-        if (fam_m == GlmFamily::Gaussian) {
-            rep_normals = noise_normals + static_cast<std::size_t>(n) +
-                          static_cast<std::size_t>(rep_idx) * static_cast<std::size_t>(n);
-        } else {
-            rep_uniforms = noise_uniforms + static_cast<std::size_t>(2) * static_cast<std::size_t>(n) +
-                           static_cast<std::size_t>(rep_idx) *
-                               static_cast<std::size_t>(2) * static_cast<std::size_t>(n);
-        }
-
-        results.push_back(simulate_medfun(fit_m_boot.coef,
-                                          fit_y_boot.coef,
-                                          sigma2_m,
-                                          rep_normals,
-                                          rep_uniforms));
     }
 
     return results;
@@ -1191,47 +1215,57 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_resample_mediati
     }
 
     for (int rep_idx = 0; rep_idx < nrep; ++rep_idx) {
-        for (int j = 0; j < n; ++j) {
-            const int sample_idx =
-                bootstrap_indices[static_cast<std::size_t>(j) * static_cast<std::size_t>(nrep) +
-                                  static_cast<std::size_t>(rep_idx)];
-            boot_exposure[j] = exposure[sample_idx];
-            boot_mediator[j] = mediator[sample_idx];
-            boot_outcome[j] = outcome[sample_idx];
-            boot_weights[j] = weights_obs[sample_idx];
+        try {
+            for (int j = 0; j < n; ++j) {
+                const int sample_idx =
+                    bootstrap_indices[static_cast<std::size_t>(j) * static_cast<std::size_t>(nrep) +
+                                      static_cast<std::size_t>(rep_idx)];
+                boot_exposure[j] = exposure[sample_idx];
+                boot_mediator[j] = mediator[sample_idx];
+                boot_outcome[j] = outcome[sample_idx];
+                boot_weights[j] = weights_obs[sample_idx];
+            }
+
+            X_med_boot.col(0).setOnes();
+            X_med_boot.col(1) = boot_exposure;
+
+            X_out_boot.col(0).setOnes();
+            X_out_boot.col(1) = boot_mediator;
+            X_out_boot.col(2) = boot_exposure;
+
+            const int glm_maxit = 25;
+            const double glm_epsilon = 1e-8;
+            const double glm_qr_tol = 1e-12;
+
+            GlmFit fit_m_boot =
+                glm_fit_irls_qr(X_med_boot,
+                                boot_mediator,
+                                GlmFamily::Poisson,
+                                boot_weights,
+                                off_m,
+                                glm_maxit,
+                                glm_epsilon,
+                                glm_qr_tol);
+            GlmFit fit_y_boot =
+                glm_fit_irls_qr(X_out_boot,
+                                boot_outcome,
+                                fam_y,
+                                boot_weights,
+                                off_y,
+                                glm_maxit,
+                                glm_epsilon,
+                                glm_qr_tol);
+
+            BootstrapResult rep = simulate_medfun(fit_m_boot.coef, fit_y_boot.coef);
+            if (!bootstrap_result_finite(rep)) {
+                continue;
+            }
+            results.push_back(rep);
+        } catch (const std::exception&) {
+            // mediate-like semantics: allow individual bootstrap replicates to fail
+            // without turning the entire combination into an NA row.
+            continue;
         }
-
-        X_med_boot.col(0).setOnes();
-        X_med_boot.col(1) = boot_exposure;
-
-        X_out_boot.col(0).setOnes();
-        X_out_boot.col(1) = boot_mediator;
-        X_out_boot.col(2) = boot_exposure;
-
-        const int glm_maxit = 25;
-        const double glm_epsilon = 1e-8;
-        const double glm_qr_tol = 1e-12;
-
-        GlmFit fit_m_boot =
-            glm_fit_irls_qr(X_med_boot,
-                            boot_mediator,
-                            GlmFamily::Poisson,
-                            boot_weights,
-                            off_m,
-                            glm_maxit,
-                            glm_epsilon,
-                            glm_qr_tol);
-        GlmFit fit_y_boot =
-            glm_fit_irls_qr(X_out_boot,
-                            boot_outcome,
-                            fam_y,
-                            boot_weights,
-                            off_y,
-                            glm_maxit,
-                            glm_epsilon,
-                            glm_qr_tol);
-
-        results.push_back(simulate_medfun(fit_m_boot.coef, fit_y_boot.coef));
     }
 
     return results;
@@ -1486,7 +1520,7 @@ std::string MediationWorker::format_results(
                : calculate_statistics_inplace(tau_samples);
 
     std::string result;
-    result.reserve(combination.size() + 512);
+    result.reserve(combination.size() + 512 + 32);
     result += csv_escape(combination, excel_safe_csv);
     result.push_back(',');
     if (legacy_output_schema) {

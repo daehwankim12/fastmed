@@ -12,6 +12,7 @@ mediation_analysis(
   num_threads = parallel::detectCores(),
   pert = "asymptotic",
   seed = NULL,
+  match_mediation = !is.null(seed),
   chunk_size = 10000,
   grain_size = 100,
   mediator.family = "auto",
@@ -46,6 +47,8 @@ estimation. Options are `"asymptotic"` and `"bootstrap"`. Default is
 \item{seed}{Optional non-negative integer. If provided, results are
 reproducible across thread counts within the same build/runtime
 environment.}
+
+\item{match_mediation}{Logical; if `TRUE`, align random number usage more closely with `mediation::mediate()` (seed handling is performed on the R side). Defaults to `!is.null(seed)`.}
 
 \item{chunk_size}{Maximum number of (exposure, mediator, outcome) combinations
 to buffer per chunk inside the C++ backend. Smaller values reduce peak

@@ -691,12 +691,12 @@ test_that("output schema and row ordering are deterministic", {
 
   expected_order <- c(
     "EXP2_MEDB_OUT2",
-    "EXP1_MEDB_OUT2",
-    "EXP2_MEDA_OUT2",
-    "EXP1_MEDA_OUT2",
     "EXP2_MEDB_OUT1",
-    "EXP1_MEDB_OUT1",
+    "EXP2_MEDA_OUT2",
     "EXP2_MEDA_OUT1",
+    "EXP1_MEDB_OUT2",
+    "EXP1_MEDB_OUT1",
+    "EXP1_MEDA_OUT2",
     "EXP1_MEDA_OUT1"
   )
   expect_equal(results$Combination, expected_order)

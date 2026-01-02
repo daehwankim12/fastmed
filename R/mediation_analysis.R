@@ -29,6 +29,9 @@
 #' @param seed Optional non-negative integer. If provided, results are
 #'   reproducible across thread counts within the same build/runtime
 #'   environment.
+#' @param match_mediation Logical; if `TRUE`, align random number usage more
+#'   closely with `mediation::mediate()` (seed handling is performed on the R
+#'   side). Defaults to `!is.null(seed)`.
 #' @param chunk_size Maximum number of (exposure, mediator, outcome) combinations
 #'   to buffer per chunk inside the C++ backend. Smaller values reduce peak
 #'   memory usage for very large analyses. Default is 10000.

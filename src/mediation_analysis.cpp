@@ -62,12 +62,14 @@ std::size_t estimate_match_mediation_rng_bytes(bool bootstrap,
 inline void decode_combination_indices(std::size_t idx,
                                       std::size_t e,
                                       std::size_t m,
+                                      std::size_t o,
                                       std::size_t& exp_list_idx,
                                       std::size_t& med_list_idx,
                                       std::size_t& out_list_idx) {
-    exp_list_idx = idx % e;
-    med_list_idx = (idx / e) % m;
-    out_list_idx = idx / (e * m);
+    static_cast<void>(e);
+    out_list_idx = idx % o;
+    med_list_idx = (idx / o) % m;
+    exp_list_idx = idx / (o * m);
 }
 
 MatchMediationRngBlock build_match_mediation_rng_block_asymptotic(
@@ -75,6 +77,7 @@ MatchMediationRngBlock build_match_mediation_rng_block_asymptotic(
     std::size_t block_end,
     std::size_t e,
     std::size_t m,
+    std::size_t o,
     const std::vector<GlmFamily>& mediator_fams,
     const std::vector<char>& mediator_fams_ok,
     const std::vector<char>& outcome_fams_ok,
@@ -95,7 +98,7 @@ MatchMediationRngBlock build_match_mediation_rng_block_asymptotic(
         std::size_t exp_list_idx = 0;
         std::size_t med_list_idx = 0;
         std::size_t out_list_idx = 0;
-        decode_combination_indices(idx, e, m, exp_list_idx, med_list_idx, out_list_idx);
+        decode_combination_indices(idx, e, m, o, exp_list_idx, med_list_idx, out_list_idx);
         const bool ok =
             (mediator_fams_ok[med_list_idx] != 0) && (outcome_fams_ok[out_list_idx] != 0);
         if (!ok) {
@@ -122,7 +125,7 @@ MatchMediationRngBlock build_match_mediation_rng_block_asymptotic(
         std::size_t exp_list_idx = 0;
         std::size_t med_list_idx = 0;
         std::size_t out_list_idx = 0;
-        decode_combination_indices(idx, e, m, exp_list_idx, med_list_idx, out_list_idx);
+        decode_combination_indices(idx, e, m, o, exp_list_idx, med_list_idx, out_list_idx);
         const bool ok =
             (mediator_fams_ok[med_list_idx] != 0) && (outcome_fams_ok[out_list_idx] != 0);
         if (!ok) {
@@ -179,6 +182,7 @@ MatchMediationRngBlock build_match_mediation_rng_block_bootstrap(
     std::size_t block_end,
     std::size_t e,
     std::size_t m,
+    std::size_t o,
     const std::vector<GlmFamily>& mediator_fams,
     const std::vector<char>& mediator_fams_ok,
     const std::vector<char>& outcome_fams_ok,
@@ -199,7 +203,7 @@ MatchMediationRngBlock build_match_mediation_rng_block_bootstrap(
         std::size_t exp_list_idx = 0;
         std::size_t med_list_idx = 0;
         std::size_t out_list_idx = 0;
-        decode_combination_indices(idx, e, m, exp_list_idx, med_list_idx, out_list_idx);
+        decode_combination_indices(idx, e, m, o, exp_list_idx, med_list_idx, out_list_idx);
         const bool ok =
             (mediator_fams_ok[med_list_idx] != 0) && (outcome_fams_ok[out_list_idx] != 0);
         if (!ok) {
@@ -226,7 +230,7 @@ MatchMediationRngBlock build_match_mediation_rng_block_bootstrap(
         std::size_t exp_list_idx = 0;
         std::size_t med_list_idx = 0;
         std::size_t out_list_idx = 0;
-        decode_combination_indices(idx, e, m, exp_list_idx, med_list_idx, out_list_idx);
+        decode_combination_indices(idx, e, m, o, exp_list_idx, med_list_idx, out_list_idx);
         const bool ok =
             (mediator_fams_ok[med_list_idx] != 0) && (outcome_fams_ok[out_list_idx] != 0);
         if (!ok) {
@@ -525,6 +529,7 @@ void mediation_analysis_cpp(NumericMatrix data,
 
                 const std::size_t e_size = exposure_col_idx_cpp.size();
                 const std::size_t m_size = mediator_col_idx_cpp.size();
+                const std::size_t o_size = outcome_col_idx_cpp.size();
 
                 MediationWorker serial_worker(data_map,
                                               weights_cpp,
@@ -563,6 +568,7 @@ void mediation_analysis_cpp(NumericMatrix data,
                     decode_combination_indices(cursor,
                                               e_size,
                                               m_size,
+                                              o_size,
                                               exp_list_idx,
                                               med_list_idx,
                                               out_list_idx);
@@ -588,6 +594,7 @@ void mediation_analysis_cpp(NumericMatrix data,
                         decode_combination_indices(block_end,
                                                   e_size,
                                                   m_size,
+                                                  o_size,
                                                   exp_list_idx,
                                                   med_list_idx,
                                                   out_list_idx);
@@ -618,6 +625,7 @@ void mediation_analysis_cpp(NumericMatrix data,
                                 block_end,
                                 e_size,
                                 m_size,
+                                o_size,
                                 mediator_fams,
                                 mediator_fams_ok,
                                 outcome_fams_ok,
@@ -629,6 +637,7 @@ void mediation_analysis_cpp(NumericMatrix data,
                                 block_end,
                                 e_size,
                                 m_size,
+                                o_size,
                                 mediator_fams,
                                 mediator_fams_ok,
                                 outcome_fams_ok,

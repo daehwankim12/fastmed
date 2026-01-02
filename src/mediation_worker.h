@@ -30,14 +30,14 @@ private:
     const std::vector<GlmFamily>& outcome_fams;
     const std::vector<char>& mediator_fams_ok;
     const std::vector<char>& outcome_fams_ok;
-    std::string pert_method;
-    const bool replace_outcome;
-    const bool legacy_output_schema;
-    const bool excel_safe_csv;
-    const double treat_value;
-    const double control_value;
-    const uint64_t base_seed;
-    const bool match_mediation;
+	    std::string pert_method;
+		    const bool replace_outcome;
+		    const bool legacy_output_schema;
+		    const bool excel_safe_csv;
+		    const double treat_value;
+		    const double control_value;
+		    const uint64_t base_seed;
+		    const bool match_mediation;
     const size_t chunk_begin;
     std::vector<std::string>& output_lines;
     const MatchMediationRngBlock* match_rng;
@@ -54,14 +54,14 @@ private:
                     const std::vector<GlmFamily>& outcome_fams_,
                     const std::vector<char>& mediator_fams_ok_,
                     const std::vector<char>& outcome_fams_ok_,
-                    const std::string& pert_method_,
-                    bool replace_outcome_,
-                    bool legacy_output_schema_,
-                    bool excel_safe_csv_,
-                    double treat_value_,
-                    double control_value_,
-                    uint64_t base_seed_,
-                    bool match_mediation_,
+	                    const std::string& pert_method_,
+		                    bool replace_outcome_,
+		                    bool legacy_output_schema_,
+		                    bool excel_safe_csv_,
+		                    double treat_value_,
+		                    double control_value_,
+		                    uint64_t base_seed_,
+		                    bool match_mediation_,
                     size_t chunk_begin_,
                     std::vector<std::string>& output_lines_,
                     const MatchMediationRngBlock* match_rng_);
@@ -74,10 +74,10 @@ private:
 	                                           Eigen::VectorXd& off_m,
 	                                           Eigen::VectorXd& off_y);
 
-	private:
-	    std::string format_na_row(const std::string& exposure_col,
-	                              const std::string& mediator_col,
-                              const std::string& outcome_col);
+		private:
+			    std::string format_na_row(const std::string& exposure_col,
+			                              const std::string& mediator_col,
+		                              const std::string& outcome_col);
 
     std::string process_combination(std::size_t idx,
                                     Eigen::MatrixXd& X_med,
@@ -164,9 +164,9 @@ private:
         const Eigen::Ref<const Eigen::VectorXd>& weights_obs,
         bool replace_outcome_);
 
-    std::string format_results(const std::string& exposure_col,
-                               const std::string& mediator_col,
-                               const std::string& outcome_col,
-                               const std::vector<BootstrapResult>& results,
-                               const BootstrapResult* t0);
+		    std::string format_results(const std::string& exposure_col,
+		                               const std::string& mediator_col,
+		                               const std::string& outcome_col,
+		                               const std::vector<BootstrapResult>& results,
+		                               const BootstrapResult* t0);
 };
