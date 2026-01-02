@@ -38,6 +38,10 @@
 #' @param grain_size Number of (exposure, mediator, outcome) combinations to
 #'   process per parallel task inside the C++ backend. Larger values reduce
 #'   scheduling overhead when individual combinations are cheap. Default is 100.
+#' @param loop_order Controls the order in which (exposure, mediator, outcome)
+#'   combinations are processed/written. Provide either a length-3 character
+#'   vector (outer-to-inner) containing a permutation of `c("exposure",
+#'   "mediator", "outcome")`, or a shorthand string like `"EMO"` (the default).
 #' @param mediator.family Model family for the mediator regression. One of
 #'   `"auto"`, `"gaussian"`, `"binomial"`, `"poisson"`. Default is `"auto"`.
 #' @param outcome.family Model family for the outcome regression. One of
@@ -105,6 +109,7 @@ mediation_analysis <- function(data,
                                match_mediation = !is.null(seed),
                                chunk_size = 10000,
                                grain_size = 100,
+                               loop_order = c("exposure", "mediator", "outcome"),
                                mediator.family = "auto",
                                outcome.family = "auto",
                                replace.outcome = FALSE,
@@ -153,6 +158,46 @@ mediation_analysis <- function(data,
     stop("grain_size must be a positive integer.")
   }
   grain_size <- as.integer(grain_size)
+
+  normalize_loop_order <- function(loop_order) {
+    if (!is.character(loop_order) || anyNA(loop_order)) {
+      stop("loop_order must be a character vector with no NA values.")
+    }
+
+    if (length(loop_order) == 1L) {
+      if (!nzchar(loop_order)) stop("loop_order must be non-empty.")
+      key <- tolower(loop_order)
+      key <- gsub("[[:space:],./-]+", "_", key)
+
+      if (nchar(key) == 3L && grepl("^[emo]{3}$", key)) {
+        tokens <- strsplit(key, "", fixed = TRUE)[[1]]
+      } else {
+        tokens <- strsplit(key, "_", fixed = TRUE)[[1]]
+        tokens <- tokens[nzchar(tokens)]
+      }
+    } else if (length(loop_order) == 3L) {
+      tokens <- tolower(loop_order)
+    } else {
+      stop("loop_order must be a length-1 string (e.g. 'EMO') or length-3 character vector.")
+    }
+
+    map_token <- function(tok) {
+      if (tok %in% c("e", "exp", "exposure")) return("exposure")
+      if (tok %in% c("m", "med", "mediator")) return("mediator")
+      if (tok %in% c("o", "out", "outcome")) return("outcome")
+      stop("Invalid loop_order token: ", tok)
+    }
+
+    tokens <- vapply(tokens, map_token, FUN.VALUE = character(1))
+
+    if (length(unique(tokens)) != 3L) {
+      stop("loop_order must contain each of: exposure, mediator, outcome exactly once.")
+    }
+
+    paste(tokens, collapse = "_")
+  }
+
+  loop_order_cpp <- normalize_loop_order(loop_order)
 
   valid_families <- c("gaussian", "binomial", "poisson", "auto")
   if (!is.character(mediator.family) || length(mediator.family) != 1L || is.na(mediator.family)) {
@@ -326,7 +371,8 @@ mediation_analysis <- function(data,
     grain_size = grain_size,
     overwrite = overwrite,
     excel_safe_csv = excel_safe_csv,
-    match_mediation = match_mediation
+    match_mediation = match_mediation,
+    loop_order = loop_order_cpp
   )
 
   cat("Mediation analysis completed. Results saved to", output_file, "\n")

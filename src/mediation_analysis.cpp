@@ -5,6 +5,7 @@
 
 #include <R_ext/Random.h>
 
+#include "fastmed_loop_order.h"
 #include "glm_fit.h"
 #include "match_mediation_rng.h"
 #include "mediation_worker.h"
@@ -59,25 +60,13 @@ std::size_t estimate_match_mediation_rng_bytes(bool bootstrap,
     return bytes;
 }
 
-inline void decode_combination_indices(std::size_t idx,
-                                      std::size_t e,
-                                      std::size_t m,
-                                      std::size_t o,
-                                      std::size_t& exp_list_idx,
-                                      std::size_t& med_list_idx,
-                                      std::size_t& out_list_idx) {
-    static_cast<void>(e);
-    out_list_idx = idx % o;
-    med_list_idx = (idx / o) % m;
-    exp_list_idx = idx / (o * m);
-}
-
 MatchMediationRngBlock build_match_mediation_rng_block_asymptotic(
     std::size_t block_begin,
     std::size_t block_end,
     std::size_t e,
     std::size_t m,
     std::size_t o,
+    const LoopOrder& loop_order,
     const std::vector<GlmFamily>& mediator_fams,
     const std::vector<char>& mediator_fams_ok,
     const std::vector<char>& outcome_fams_ok,
@@ -98,7 +87,8 @@ MatchMediationRngBlock build_match_mediation_rng_block_asymptotic(
         std::size_t exp_list_idx = 0;
         std::size_t med_list_idx = 0;
         std::size_t out_list_idx = 0;
-        decode_combination_indices(idx, e, m, o, exp_list_idx, med_list_idx, out_list_idx);
+        decode_combination_indices(
+            idx, e, m, o, loop_order, exp_list_idx, med_list_idx, out_list_idx);
         const bool ok =
             (mediator_fams_ok[med_list_idx] != 0) && (outcome_fams_ok[out_list_idx] != 0);
         if (!ok) {
@@ -125,7 +115,8 @@ MatchMediationRngBlock build_match_mediation_rng_block_asymptotic(
         std::size_t exp_list_idx = 0;
         std::size_t med_list_idx = 0;
         std::size_t out_list_idx = 0;
-        decode_combination_indices(idx, e, m, o, exp_list_idx, med_list_idx, out_list_idx);
+        decode_combination_indices(
+            idx, e, m, o, loop_order, exp_list_idx, med_list_idx, out_list_idx);
         const bool ok =
             (mediator_fams_ok[med_list_idx] != 0) && (outcome_fams_ok[out_list_idx] != 0);
         if (!ok) {
@@ -183,6 +174,7 @@ MatchMediationRngBlock build_match_mediation_rng_block_bootstrap(
     std::size_t e,
     std::size_t m,
     std::size_t o,
+    const LoopOrder& loop_order,
     const std::vector<GlmFamily>& mediator_fams,
     const std::vector<char>& mediator_fams_ok,
     const std::vector<char>& outcome_fams_ok,
@@ -203,7 +195,8 @@ MatchMediationRngBlock build_match_mediation_rng_block_bootstrap(
         std::size_t exp_list_idx = 0;
         std::size_t med_list_idx = 0;
         std::size_t out_list_idx = 0;
-        decode_combination_indices(idx, e, m, o, exp_list_idx, med_list_idx, out_list_idx);
+        decode_combination_indices(
+            idx, e, m, o, loop_order, exp_list_idx, med_list_idx, out_list_idx);
         const bool ok =
             (mediator_fams_ok[med_list_idx] != 0) && (outcome_fams_ok[out_list_idx] != 0);
         if (!ok) {
@@ -230,7 +223,8 @@ MatchMediationRngBlock build_match_mediation_rng_block_bootstrap(
         std::size_t exp_list_idx = 0;
         std::size_t med_list_idx = 0;
         std::size_t out_list_idx = 0;
-        decode_combination_indices(idx, e, m, o, exp_list_idx, med_list_idx, out_list_idx);
+        decode_combination_indices(
+            idx, e, m, o, loop_order, exp_list_idx, med_list_idx, out_list_idx);
         const bool ok =
             (mediator_fams_ok[med_list_idx] != 0) && (outcome_fams_ok[out_list_idx] != 0);
         if (!ok) {
@@ -303,7 +297,8 @@ void mediation_analysis_cpp(NumericMatrix data,
                             int grain_size = 1,
                             bool overwrite = true,
                             bool excel_safe_csv = false,
-                            bool match_mediation = false) {
+                            bool match_mediation = false,
+                            std::string loop_order = "exposure_mediator_outcome") {
     try {
         if (data.nrow() == 0 || data.ncol() == 0) {
             throw std::invalid_argument("Data matrix is empty");
@@ -469,6 +464,8 @@ void mediation_analysis_cpp(NumericMatrix data,
         const size_t em = checked_mul(e, m);
         const size_t num_combinations = checked_mul(em, o);
 
+        const LoopOrder loop_order_cpp = parse_loop_order(loop_order);
+
         if (!overwrite) {
             std::ifstream existing(output_file);
             if (existing.good()) {
@@ -550,6 +547,7 @@ void mediation_analysis_cpp(NumericMatrix data,
                                               control_value,
                                               base_seed,
                                               match_mediation,
+                                              loop_order_cpp,
                                               chunk_begin,
                                               chunk_results,
                                               nullptr);
@@ -569,6 +567,7 @@ void mediation_analysis_cpp(NumericMatrix data,
                                               e_size,
                                               m_size,
                                               o_size,
+                                              loop_order_cpp,
                                               exp_list_idx,
                                               med_list_idx,
                                               out_list_idx);
@@ -595,6 +594,7 @@ void mediation_analysis_cpp(NumericMatrix data,
                                                   e_size,
                                                   m_size,
                                                   o_size,
+                                                  loop_order_cpp,
                                                   exp_list_idx,
                                                   med_list_idx,
                                                   out_list_idx);
@@ -626,6 +626,7 @@ void mediation_analysis_cpp(NumericMatrix data,
                                 e_size,
                                 m_size,
                                 o_size,
+                                loop_order_cpp,
                                 mediator_fams,
                                 mediator_fams_ok,
                                 outcome_fams_ok,
@@ -638,6 +639,7 @@ void mediation_analysis_cpp(NumericMatrix data,
                                 e_size,
                                 m_size,
                                 o_size,
+                                loop_order_cpp,
                                 mediator_fams,
                                 mediator_fams_ok,
                                 outcome_fams_ok,
@@ -665,6 +667,7 @@ void mediation_analysis_cpp(NumericMatrix data,
                                            control_value,
                                            base_seed,
                                            match_mediation,
+                                           loop_order_cpp,
                                            chunk_begin,
                                            chunk_results,
                                            &rng_block);
@@ -693,6 +696,7 @@ void mediation_analysis_cpp(NumericMatrix data,
                                        control_value,
                                        base_seed,
                                        match_mediation,
+                                       loop_order_cpp,
                                        chunk_begin,
                                        chunk_results,
                                        nullptr);

@@ -91,6 +91,7 @@ print(results)
 - `outcome.family`: (Optional) Model family for the outcome regression: `"auto"`, `"gaussian"`, `"binomial"`, `"poisson"`.
 - `replace.outcome`: (Optional) If TRUE, replace some simulated outcomes with observed outcomes (may reduce agreement with `mediation::mediate()`).
 - `output.format`: (Optional) Output CSV schema. `"mediate"` (default) writes mediate-style effect columns; `"legacy"` writes the previous schema.
+- `loop_order`: (Optional) Order of iteration over combinations: `"EMO"` (exposure-mediator-outcome, default), `"MEO"`, `"OEM"`, `"OME"`, `"EOM"`, or `"MOE"`.
 
 ### Output
 
@@ -146,7 +147,7 @@ fastmed builds upon several powerful R packages:
 If you use fastmed in your research, please cite it as follows:
 
 ```
-Kim, D. (2025). fastmed: Fast Mediation Analysis in R. R package version 0.2.0.
+Kim, D. (2026). fastmed: Fast Mediation Analysis in R. R package version 0.2.0.
 https://github.com/daehwankim12/fastmed
 ```
 

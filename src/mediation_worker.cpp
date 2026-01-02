@@ -120,6 +120,7 @@ MediationWorker::MediationWorker(const Eigen::Map<const MatrixXd>& data_,
                                  double control_value_,
                                  uint64_t base_seed_,
                                  bool match_mediation_,
+                                 LoopOrder loop_order_,
                                  size_t chunk_begin_,
                                  std::vector<std::string>& output_lines_,
                                  const MatchMediationRngBlock* match_rng_)
@@ -142,6 +143,7 @@ MediationWorker::MediationWorker(const Eigen::Map<const MatrixXd>& data_,
       control_value(control_value_),
       base_seed(base_seed_),
       match_mediation(match_mediation_),
+      loop_order(loop_order_),
       chunk_begin(chunk_begin_),
       output_lines(output_lines_),
       match_rng(match_rng_) {}
@@ -192,12 +194,15 @@ std::string MediationWorker::process_combination(std::size_t idx,
                                                  MatrixXd& X_out,
                                                  VectorXd& off_m,
                                                  VectorXd& off_y) {
+    const size_t e = exposure_col_idx.size();
     const size_t m = mediator_col_idx.size();
     const size_t o = outcome_col_idx.size();
 
-    const size_t out_list_idx = idx % o;
-    const size_t med_list_idx = (idx / o) % m;
-    const size_t exp_list_idx = idx / (o * m);
+    std::size_t exp_list_idx = 0;
+    std::size_t med_list_idx = 0;
+    std::size_t out_list_idx = 0;
+    decode_combination_indices(
+        idx, e, m, o, loop_order, exp_list_idx, med_list_idx, out_list_idx);
 
     const int exp_idx = exposure_col_idx[exp_list_idx];
     const int med_idx = mediator_col_idx[med_list_idx];
@@ -211,7 +216,8 @@ std::string MediationWorker::process_combination(std::size_t idx,
     const auto mediator = data.col(med_idx);
     const auto outcome = data.col(out_idx);
 
-    const uint64_t global_combination_idx = static_cast<uint64_t>(idx);
+    const uint64_t combination_seed_idx =
+        canonical_combination_index(exp_list_idx, med_list_idx, out_list_idx, m, o);
 
     if (!mediator_fams_ok[med_list_idx] || !outcome_fams_ok[out_list_idx]) {
         return format_na_row(exposure_col, mediator_col, outcome_col);
@@ -272,7 +278,7 @@ std::string MediationWorker::process_combination(std::size_t idx,
 	                }
 	            } else {
 	                bootstrap_results = perform_bootstrap_asymptotic(
-	                    fit_m, fit_y, fam_m, fam_y, n, global_combination_idx, exposure,
+	                    fit_m, fit_y, fam_m, fam_y, n, combination_seed_idx, exposure,
 	                    outcome, replace_outcome);
             }
 	        } else if (pert_method == "bootstrap") {
@@ -318,10 +324,9 @@ std::string MediationWorker::process_combination(std::size_t idx,
 	                    t0_ptr = &t0_result;
 	                }
 	            } else {
-	                std::mt19937_64 rng_t0(
-	                    derive_seed(base_seed,
-	                                global_combination_idx,
-                                std::numeric_limits<uint64_t>::max()));
+	                std::mt19937_64 rng_t0(derive_seed(base_seed,
+	                                                   combination_seed_idx,
+	                                                   std::numeric_limits<uint64_t>::max()));
                 const double sigma2_m =
                     (fam_m == GlmFamily::Gaussian) ? fit_m.dispersion : 1.0;
                 t0_result = simulate_effect_draw(fit_m.coef,
@@ -336,7 +341,7 @@ std::string MediationWorker::process_combination(std::size_t idx,
                                                  replace_outcome);
                 t0_ptr = &t0_result;
                 bootstrap_results = perform_bootstrap_resample(
-                    exposure, mediator, outcome, fam_m, fam_y, n, global_combination_idx,
+                    exposure, mediator, outcome, fam_m, fam_y, n, combination_seed_idx,
                     replace_outcome);
             }
         } else {

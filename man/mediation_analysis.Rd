@@ -15,6 +15,7 @@ mediation_analysis(
   match_mediation = !is.null(seed),
   chunk_size = 10000,
   grain_size = 100,
+  loop_order = c("exposure", "mediator", "outcome"),
   mediator.family = "auto",
   outcome.family = "auto",
   replace.outcome = FALSE,
@@ -57,6 +58,11 @@ memory usage for very large analyses. Default is 10000.}
 \item{grain_size}{Number of (exposure, mediator, outcome) combinations to
 process per parallel task inside the C++ backend. Larger values reduce
 scheduling overhead when individual combinations are cheap. Default is 100.}
+
+\item{loop_order}{Controls the order in which (exposure, mediator, outcome)
+combinations are processed/written. Provide either a length-3 character
+vector (outer-to-inner) containing a permutation of `c("exposure",
+"mediator", "outcome")`, or a shorthand string like `"EMO"` (the default).}
 
 \item{mediator.family}{Model family for the mediator regression. One of
 `"auto"`, `"gaussian"`, `"binomial"`, `"poisson"`. Default is `"auto"`.}

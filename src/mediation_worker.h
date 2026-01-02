@@ -3,6 +3,7 @@
 #include <RcppEigen.h>
 #include <RcppParallel.h>
 
+#include "fastmed_loop_order.h"
 #include "glm_fit.h"
 #include "match_mediation_rng.h"
 
@@ -38,6 +39,7 @@ private:
 		    const double control_value;
 		    const uint64_t base_seed;
 		    const bool match_mediation;
+		    const LoopOrder loop_order;
     const size_t chunk_begin;
     std::vector<std::string>& output_lines;
     const MatchMediationRngBlock* match_rng;
@@ -62,6 +64,7 @@ private:
 		                    double control_value_,
 		                    uint64_t base_seed_,
 		                    bool match_mediation_,
+		                    LoopOrder loop_order_,
                     size_t chunk_begin_,
                     std::vector<std::string>& output_lines_,
                     const MatchMediationRngBlock* match_rng_);
