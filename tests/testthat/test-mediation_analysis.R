@@ -204,25 +204,49 @@ test_that("p-values use mediate sign test", {
   expect_lte(p_value, 0.05)
 })
 
-test_that("NA data is rejected with clear error", {
-  test_data <- data.table::data.table(
-    EXP1 = c(rnorm(49), NA_real_),
+test_that("NA rows are omitted per combination (matches complete-case run)", {
+  set.seed(123)
+  test_data_na <- data.table::data.table(
+    EXP1 = rnorm(50),
     MED1 = rnorm(50),
     OUT1 = rnorm(50)
   )
+  test_data_na$EXP1[1] <- NA_real_
 
-  output_csv <- withr::local_tempfile(fileext = ".csv")
+  test_data_cc <- test_data_na[stats::complete.cases(test_data_na)]
 
-  expect_error(
-    mediation_analysis(
-      data = test_data,
-      columns = list(exposure = c("EXP"), mediator = c("MED"), outcome = c("OUT")),
-      nrep = 10,
-      output_file = output_csv,
-      num_threads = 1
-    ),
-    regexp = "missing values"
+  output_csv_na <- withr::local_tempfile(fileext = ".csv")
+  output_csv_cc <- withr::local_tempfile(fileext = ".csv")
+
+  mediation_analysis(
+    data = test_data_na,
+    columns = list(exposure = c("EXP"), mediator = c("MED"), outcome = c("OUT")),
+    nrep = 30,
+    output_file = output_csv_na,
+    num_threads = 1,
+    seed = 42
   )
+
+  mediation_analysis(
+    data = test_data_cc,
+    columns = list(exposure = c("EXP"), mediator = c("MED"), outcome = c("OUT")),
+    nrep = 30,
+    output_file = output_csv_cc,
+    num_threads = 1,
+    seed = 42
+  )
+
+  results_na <- data.table::fread(output_csv_na)
+  results_cc <- data.table::fread(output_csv_cc)
+
+  expect_equal(nrow(results_na), 1)
+  expect_equal(nrow(results_cc), 1)
+  expect_equal(results_na$Combination, results_cc$Combination)
+
+  numeric_cols <- names(results_na)[vapply(results_na, is.numeric, logical(1))]
+  for (col in numeric_cols) {
+    expect_equal(results_na[[col]], results_cc[[col]], tolerance = 1e-12)
+  }
 })
 
 test_that("seed parameter produces reproducible results", {

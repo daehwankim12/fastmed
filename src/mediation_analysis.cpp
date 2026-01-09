@@ -31,13 +31,13 @@ namespace {
 std::size_t estimate_match_mediation_rng_bytes(bool bootstrap,
                                                bool ok,
                                                GlmFamily fam_m,
-                                               int n,
+                                               int n_obs,
                                                int nrep) {
-    if (!ok || n <= 0 || nrep <= 0) {
+    if (!ok || n_obs <= 0 || nrep <= 0) {
         return 0;
     }
 
-    const std::size_t nn = static_cast<std::size_t>(n);
+    const std::size_t nn = static_cast<std::size_t>(n_obs);
     const std::size_t rr = static_cast<std::size_t>(nrep);
     std::size_t bytes = 0;
 
@@ -70,20 +70,26 @@ MatchMediationRngBlock build_match_mediation_rng_block_asymptotic(
     const std::vector<GlmFamily>& mediator_fams,
     const std::vector<char>& mediator_fams_ok,
     const std::vector<char>& outcome_fams_ok,
-    int n,
+    const std::vector<int>& nobs,
     int nrep) {
     MatchMediationRngBlock block;
     block.begin = block_begin;
     block.end = block_end;
-    block.n = n;
+    block.n = 0;
     block.nrep = nrep;
     block.bootstrap = false;
     block.slices.resize(block_end - block_begin);
 
+    if (nobs.size() != (block_end - block_begin)) {
+        throw std::runtime_error("match_mediation: nobs length mismatch");
+    }
+
     std::size_t ok_count = 0;
-    std::size_t gaussian_count = 0;
-    std::size_t other_count = 0;
+    std::size_t gaussian_obs = 0;
+    std::size_t other_obs = 0;
     for (std::size_t idx = block_begin; idx < block_end; ++idx) {
+        const std::size_t local = idx - block_begin;
+        const int n_obs = nobs[local];
         std::size_t exp_list_idx = 0;
         std::size_t med_list_idx = 0;
         std::size_t out_list_idx = 0;
@@ -91,26 +97,27 @@ MatchMediationRngBlock build_match_mediation_rng_block_asymptotic(
             idx, e, m, o, loop_order, exp_list_idx, med_list_idx, out_list_idx);
         const bool ok =
             (mediator_fams_ok[med_list_idx] != 0) && (outcome_fams_ok[out_list_idx] != 0);
-        if (!ok) {
+        const bool ok_rng = ok && (n_obs > 3);
+        if (!ok_rng) {
             continue;
         }
         ++ok_count;
         if (mediator_fams[med_list_idx] == GlmFamily::Gaussian) {
-            ++gaussian_count;
+            gaussian_obs += static_cast<std::size_t>(n_obs);
         } else {
-            ++other_count;
+            other_obs += static_cast<std::size_t>(n_obs);
         }
     }
 
-    const std::size_t nn = static_cast<std::size_t>(n);
     const std::size_t rr = static_cast<std::size_t>(nrep);
     block.coef_normals.reserve(ok_count * rr * 5);
-    block.noise_normals.reserve(gaussian_count * rr * nn);
-    block.noise_uniforms.reserve(other_count * rr * nn * 2);
+    block.noise_normals.reserve(rr * gaussian_obs);
+    block.noise_uniforms.reserve(rr * other_obs * 2);
 
     for (std::size_t idx = block_begin; idx < block_end; ++idx) {
         const std::size_t local = idx - block_begin;
         MatchMediationRngSlice& slice = block.slices[local];
+        slice.n = nobs[local];
 
         std::size_t exp_list_idx = 0;
         std::size_t med_list_idx = 0;
@@ -119,7 +126,9 @@ MatchMediationRngBlock build_match_mediation_rng_block_asymptotic(
             idx, e, m, o, loop_order, exp_list_idx, med_list_idx, out_list_idx);
         const bool ok =
             (mediator_fams_ok[med_list_idx] != 0) && (outcome_fams_ok[out_list_idx] != 0);
-        if (!ok) {
+        const int n_obs = slice.n;
+        const bool ok_rng = ok && (n_obs > 3);
+        if (!ok_rng) {
             continue;
         }
 
@@ -142,7 +151,7 @@ MatchMediationRngBlock build_match_mediation_rng_block_asymptotic(
             slice.noise_kind = MatchMediationNoiseKind::Normals;
             slice.noise_offset = block.noise_normals.size();
             // E matrix (nrep x n) consumed column-major: j outer, rep inner
-            for (int j = 0; j < n; ++j) {
+            for (int j = 0; j < n_obs; ++j) {
                 for (int rep_idx = 0; rep_idx < nrep; ++rep_idx) {
                     block.noise_normals.push_back(norm_rand());
                 }
@@ -151,13 +160,13 @@ MatchMediationRngBlock build_match_mediation_rng_block_asymptotic(
             slice.noise_kind = MatchMediationNoiseKind::Uniforms;
             slice.noise_offset = block.noise_uniforms.size();
             // M1 uniforms (nrep x n), column-major: j outer, rep inner
-            for (int j = 0; j < n; ++j) {
+            for (int j = 0; j < n_obs; ++j) {
                 for (int rep_idx = 0; rep_idx < nrep; ++rep_idx) {
                     block.noise_uniforms.push_back(unif_rand());
                 }
             }
             // M0 uniforms (nrep x n), column-major: j outer, rep inner
-            for (int j = 0; j < n; ++j) {
+            for (int j = 0; j < n_obs; ++j) {
                 for (int rep_idx = 0; rep_idx < nrep; ++rep_idx) {
                     block.noise_uniforms.push_back(unif_rand());
                 }
@@ -178,20 +187,26 @@ MatchMediationRngBlock build_match_mediation_rng_block_bootstrap(
     const std::vector<GlmFamily>& mediator_fams,
     const std::vector<char>& mediator_fams_ok,
     const std::vector<char>& outcome_fams_ok,
-    int n,
+    const std::vector<int>& nobs,
     int nrep) {
     MatchMediationRngBlock block;
     block.begin = block_begin;
     block.end = block_end;
-    block.n = n;
+    block.n = 0;
     block.nrep = nrep;
     block.bootstrap = true;
     block.slices.resize(block_end - block_begin);
 
+    if (nobs.size() != (block_end - block_begin)) {
+        throw std::runtime_error("match_mediation: nobs length mismatch");
+    }
+
     std::size_t ok_count = 0;
-    std::size_t gaussian_count = 0;
-    std::size_t other_count = 0;
+    std::size_t gaussian_obs = 0;
+    std::size_t other_obs = 0;
     for (std::size_t idx = block_begin; idx < block_end; ++idx) {
+        const std::size_t local = idx - block_begin;
+        const int n_obs = nobs[local];
         std::size_t exp_list_idx = 0;
         std::size_t med_list_idx = 0;
         std::size_t out_list_idx = 0;
@@ -199,26 +214,27 @@ MatchMediationRngBlock build_match_mediation_rng_block_bootstrap(
             idx, e, m, o, loop_order, exp_list_idx, med_list_idx, out_list_idx);
         const bool ok =
             (mediator_fams_ok[med_list_idx] != 0) && (outcome_fams_ok[out_list_idx] != 0);
-        if (!ok) {
+        const bool ok_rng = ok && (n_obs > 3);
+        if (!ok_rng) {
             continue;
         }
         ++ok_count;
         if (mediator_fams[med_list_idx] == GlmFamily::Gaussian) {
-            ++gaussian_count;
+            gaussian_obs += static_cast<std::size_t>(n_obs);
         } else {
-            ++other_count;
+            other_obs += static_cast<std::size_t>(n_obs);
         }
     }
 
-    const std::size_t nn = static_cast<std::size_t>(n);
     const std::size_t rr = static_cast<std::size_t>(nrep);
-    block.bootstrap_indices.reserve(ok_count * rr * nn);
-    block.noise_normals.reserve(gaussian_count * (rr + 1) * nn);
-    block.noise_uniforms.reserve(other_count * (rr + 1) * nn * 2);
+    block.bootstrap_indices.reserve(rr * (gaussian_obs + other_obs));
+    block.noise_normals.reserve((rr + 1) * gaussian_obs);
+    block.noise_uniforms.reserve((rr + 1) * other_obs * 2);
 
     for (std::size_t idx = block_begin; idx < block_end; ++idx) {
         const std::size_t local = idx - block_begin;
         MatchMediationRngSlice& slice = block.slices[local];
+        slice.n = nobs[local];
 
         std::size_t exp_list_idx = 0;
         std::size_t med_list_idx = 0;
@@ -227,16 +243,18 @@ MatchMediationRngBlock build_match_mediation_rng_block_bootstrap(
             idx, e, m, o, loop_order, exp_list_idx, med_list_idx, out_list_idx);
         const bool ok =
             (mediator_fams_ok[med_list_idx] != 0) && (outcome_fams_ok[out_list_idx] != 0);
-        if (!ok) {
+        const int n_obs = slice.n;
+        const bool ok_rng = ok && (n_obs > 3);
+        if (!ok_rng) {
             continue;
         }
 
         slice.idx_offset = block.bootstrap_indices.size();
         // indices consumed column-major: j outer, rep inner
-        for (int j = 0; j < n; ++j) {
+        for (int j = 0; j < n_obs; ++j) {
             for (int rep_idx = 0; rep_idx < nrep; ++rep_idx) {
                 block.bootstrap_indices.push_back(
-                    static_cast<int>(R_unif_index(static_cast<double>(n))));
+                    static_cast<int>(R_unif_index(static_cast<double>(n_obs))));
             }
         }
 
@@ -245,12 +263,12 @@ MatchMediationRngBlock build_match_mediation_rng_block_bootstrap(
             slice.noise_kind = MatchMediationNoiseKind::Normals;
             slice.noise_offset = block.noise_normals.size();
             // t0 noise: i outer
-            for (int i = 0; i < n; ++i) {
+            for (int i = 0; i < n_obs; ++i) {
                 block.noise_normals.push_back(norm_rand());
             }
             // rep noise: rep outer, i inner
             for (int rep_idx = 0; rep_idx < nrep; ++rep_idx) {
-                for (int i = 0; i < n; ++i) {
+                for (int i = 0; i < n_obs; ++i) {
                     block.noise_normals.push_back(norm_rand());
                 }
             }
@@ -258,13 +276,13 @@ MatchMediationRngBlock build_match_mediation_rng_block_bootstrap(
             slice.noise_kind = MatchMediationNoiseKind::Uniforms;
             slice.noise_offset = block.noise_uniforms.size();
             // t0 noise: i outer, (M1, M0) per i
-            for (int i = 0; i < n; ++i) {
+            for (int i = 0; i < n_obs; ++i) {
                 block.noise_uniforms.push_back(unif_rand());  // M1
                 block.noise_uniforms.push_back(unif_rand());  // M0
             }
             // rep noise: rep outer, i inner, (M1, M0) per i
             for (int rep_idx = 0; rep_idx < nrep; ++rep_idx) {
-                for (int i = 0; i < n; ++i) {
+                for (int i = 0; i < n_obs; ++i) {
                     block.noise_uniforms.push_back(unif_rand());  // M1
                     block.noise_uniforms.push_back(unif_rand());  // M0
                 }
@@ -558,6 +576,22 @@ void mediation_analysis_cpp(NumericMatrix data,
                 Eigen::MatrixXd X_out(n, 3);
                 X_med.col(0).setOnes();
                 X_out.col(0).setOnes();
+                Eigen::VectorXd outcome_obs_buf(n);
+                Eigen::VectorXd weights_obs_buf(n);
+
+                auto count_complete_cases = [&](int exp_idx, int med_idx, int out_idx) -> int {
+                    int n_obs = 0;
+                    for (int i = 0; i < n; ++i) {
+                        const double ti = data_map(i, exp_idx);
+                        const double mi = data_map(i, med_idx);
+                        const double yi = data_map(i, out_idx);
+                        if (std::isnan(ti) || std::isnan(mi) || std::isnan(yi)) {
+                            continue;
+                        }
+                        ++n_obs;
+                    }
+                    return n_obs;
+                };
 
                 for (std::size_t cursor = chunk_begin; cursor < chunk_end;) {
                     std::size_t exp_list_idx = 0;
@@ -579,7 +613,13 @@ void mediation_analysis_cpp(NumericMatrix data,
                     if (ok && fam_m == GlmFamily::Poisson) {
                         chunk_results[cursor - chunk_begin] =
                             serial_worker.process_combination_serial(
-                                cursor, X_med, X_out, off_m, off_y);
+                                cursor,
+                                X_med,
+                                X_out,
+                                off_m,
+                                off_y,
+                                outcome_obs_buf,
+                                weights_obs_buf);
                         ++cursor;
                         Rcpp::checkUserInterrupt();
                         continue;
@@ -588,6 +628,7 @@ void mediation_analysis_cpp(NumericMatrix data,
                     const std::size_t block_begin = cursor;
                     std::size_t block_end = cursor;
                     std::size_t rng_bytes = 0;
+                    std::vector<int> nobs_block;
 
                     while (block_end < chunk_end) {
                         decode_combination_indices(block_end,
@@ -606,13 +647,23 @@ void mediation_analysis_cpp(NumericMatrix data,
                             break;
                         }
 
+                        int n_obs = 0;
+                        if (ok_block) {
+                            n_obs = count_complete_cases(
+                                exposure_col_idx_cpp[exp_list_idx],
+                                mediator_col_idx_cpp[med_list_idx],
+                                outcome_col_idx_cpp[out_list_idx]);
+                        }
+
+                        const bool ok_rng = ok_block && (n_obs > 3);
                         const std::size_t add = estimate_match_mediation_rng_bytes(
-                            bootstrap, ok_block, fam_m_block, n, nrep);
+                            bootstrap, ok_rng, fam_m_block, n_obs, nrep);
 
                         if (block_end > block_begin && rng_bytes + add > max_rng_bytes) {
                             break;
                         }
                         rng_bytes += add;
+                        nobs_block.push_back(n_obs);
                         ++block_end;
                     }
 
@@ -630,7 +681,7 @@ void mediation_analysis_cpp(NumericMatrix data,
                                 mediator_fams,
                                 mediator_fams_ok,
                                 outcome_fams_ok,
-                                n,
+                                nobs_block,
                                 nrep);
                         } else {
                             rng_block = build_match_mediation_rng_block_asymptotic(
@@ -643,7 +694,7 @@ void mediation_analysis_cpp(NumericMatrix data,
                                 mediator_fams,
                                 mediator_fams_ok,
                                 outcome_fams_ok,
-                                n,
+                                nobs_block,
                                 nrep);
                         }
                     }

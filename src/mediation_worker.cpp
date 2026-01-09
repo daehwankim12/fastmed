@@ -152,6 +152,8 @@ void MediationWorker::operator()(std::size_t begin, std::size_t end) {
     const int n = static_cast<int>(data.rows());
     VectorXd off_m = VectorXd::Zero(n);
     VectorXd off_y = VectorXd::Zero(n);
+    VectorXd outcome_obs_buf(n);
+    VectorXd weights_obs_buf(n);
 
     MatrixXd X_med(n, 2);
     X_med.col(0).setOnes();
@@ -161,7 +163,13 @@ void MediationWorker::operator()(std::size_t begin, std::size_t end) {
 
     for (std::size_t idx = begin; idx < end; ++idx) {
         output_lines[idx - chunk_begin] =
-            process_combination(idx, X_med, X_out, off_m, off_y);
+            process_combination(idx,
+                                X_med,
+                                X_out,
+                                off_m,
+                                off_y,
+                                outcome_obs_buf,
+                                weights_obs_buf);
 	    }
 	}
 
@@ -169,8 +177,16 @@ std::string MediationWorker::process_combination_serial(std::size_t idx,
                                                         MatrixXd& X_med,
                                                         MatrixXd& X_out,
                                                         VectorXd& off_m,
-                                                        VectorXd& off_y) {
-    return process_combination(idx, X_med, X_out, off_m, off_y);
+                                                        VectorXd& off_y,
+                                                        VectorXd& outcome_obs_buf,
+                                                        VectorXd& weights_obs_buf) {
+    return process_combination(idx,
+                               X_med,
+                               X_out,
+                               off_m,
+                               off_y,
+                               outcome_obs_buf,
+                               weights_obs_buf);
 }
 
 std::string MediationWorker::format_na_row(const std::string& exposure_col,
@@ -193,7 +209,9 @@ std::string MediationWorker::process_combination(std::size_t idx,
                                                  MatrixXd& X_med,
                                                  MatrixXd& X_out,
                                                  VectorXd& off_m,
-                                                 VectorXd& off_y) {
+                                                 VectorXd& off_y,
+                                                 VectorXd& outcome_obs_buf,
+                                                 VectorXd& weights_obs_buf) {
     const size_t e = exposure_col_idx.size();
     const size_t m = mediator_col_idx.size();
     const size_t o = outcome_col_idx.size();
@@ -226,24 +244,61 @@ std::string MediationWorker::process_combination(std::size_t idx,
     const GlmFamily fam_y = outcome_fams[out_list_idx];
 
     try {
-        const int n = static_cast<int>(data.rows());
+        const int n_total = static_cast<int>(data.rows());
+        if (outcome_obs_buf.size() != n_total || weights_obs_buf.size() != n_total) {
+            throw std::runtime_error("process_combination: buffer size mismatch");
+        }
 
-        X_med.col(1) = exposure;
+        int n = 0;
+        for (int i = 0; i < n_total; ++i) {
+            const double ti = exposure[i];
+            const double mi = mediator[i];
+            const double yi = outcome[i];
+            if (std::isnan(ti) || std::isnan(mi) || std::isnan(yi)) {
+                continue;
+            }
+            X_med(n, 1) = ti;
+            X_out(n, 1) = mi;
+            X_out(n, 2) = ti;
+            outcome_obs_buf[n] = yi;
+            weights_obs_buf[n] = weights[i];
+            ++n;
+        }
 
-        X_out.col(1) = mediator;
-        X_out.col(2) = exposure;
+        const int p_med = 2;
+        const int p_out = 3;
+        if (n <= p_med || n <= p_out) {
+            return format_na_row(exposure_col, mediator_col, outcome_col);
+        }
+
+        const auto exposure_obs = X_med.topRows(n).col(1);
+        const auto mediator_obs = X_out.topRows(n).col(1);
+        const auto outcome_obs = outcome_obs_buf.head(n);
+        const auto weights_obs = weights_obs_buf.head(n);
 
         const int glm_maxit = 25;
         const double glm_epsilon = 1e-8;
         const double glm_qr_tol = 1e-12;
 
         GlmFit fit_m =
-            glm_fit_irls_qr(X_med, mediator, fam_m, weights, off_m, glm_maxit,
-                            glm_epsilon, glm_qr_tol);
+            glm_fit_irls_qr(X_med.topRows(n),
+                            mediator_obs,
+                            fam_m,
+                            weights_obs,
+                            off_m.head(n),
+                            glm_maxit,
+                            glm_epsilon,
+                            glm_qr_tol);
 
         GlmFit fit_y =
-            glm_fit_irls_qr(X_out, outcome, fam_y, weights, off_y, glm_maxit,
-                            glm_epsilon, glm_qr_tol);
+            glm_fit_irls_qr(X_out.topRows(n),
+                            outcome_obs,
+                            fam_y,
+                            weights_obs,
+                            off_y.head(n),
+                            glm_maxit,
+                            glm_epsilon,
+                            glm_qr_tol);
 
 	        std::vector<BootstrapResult> bootstrap_results;
 	        BootstrapResult t0_result{};
@@ -257,7 +312,14 @@ std::string MediationWorker::process_combination(std::size_t idx,
 	                    }
 	                    bootstrap_results =
 	                        perform_bootstrap_asymptotic_mediation_poisson_serial(
-	                            fit_m, fit_y, fam_y, n, exposure, outcome, replace_outcome);
+	                            fit_m,
+	                            fit_y,
+	                            fam_y,
+	                            n,
+	                            exposure_obs,
+	                            outcome_obs,
+	                            weights_obs,
+	                            replace_outcome);
 	                } else {
 	                    if (!match_rng || idx < match_rng->begin || idx >= match_rng->end) {
 	                        throw std::runtime_error(
@@ -265,21 +327,34 @@ std::string MediationWorker::process_combination(std::size_t idx,
 	                    }
 	                    const MatchMediationRngSlice& slice =
 	                        match_rng->slices[idx - match_rng->begin];
+	                    if (slice.n != n) {
+	                        throw std::runtime_error(
+	                            "match_mediation: complete-case count mismatch");
+	                    }
 	                    bootstrap_results = perform_bootstrap_asymptotic_mediation_rng(
 	                        fit_m,
 	                        fit_y,
 	                        fam_m,
 	                        fam_y,
 	                        n,
-	                        exposure,
-	                        outcome,
+	                        exposure_obs,
+	                        outcome_obs,
+	                        weights_obs,
 	                        replace_outcome,
 	                        slice);
 	                }
 	            } else {
 	                bootstrap_results = perform_bootstrap_asymptotic(
-	                    fit_m, fit_y, fam_m, fam_y, n, combination_seed_idx, exposure,
-	                    outcome, replace_outcome);
+	                    fit_m,
+	                    fit_y,
+	                    fam_m,
+	                    fam_y,
+	                    n,
+	                    combination_seed_idx,
+	                    exposure_obs,
+	                    outcome_obs,
+	                    weights_obs,
+	                    replace_outcome);
             }
 	        } else if (pert_method == "bootstrap") {
 	            if (match_mediation) {
@@ -292,12 +367,12 @@ std::string MediationWorker::process_combination(std::size_t idx,
 	                        perform_bootstrap_resample_mediation_poisson_serial(
 	                            fit_m,
 	                            fit_y,
-	                            exposure,
-	                            mediator,
-	                            outcome,
+	                            exposure_obs,
+	                            mediator_obs,
+	                            outcome_obs,
 	                            fam_y,
 	                            n,
-	                            weights,
+	                            weights_obs,
 	                            replace_outcome,
 	                            &t0_result);
 	                    t0_ptr = &t0_result;
@@ -308,16 +383,20 @@ std::string MediationWorker::process_combination(std::size_t idx,
 	                    }
 	                    const MatchMediationRngSlice& slice =
 	                        match_rng->slices[idx - match_rng->begin];
+	                    if (slice.n != n) {
+	                        throw std::runtime_error(
+	                            "match_mediation: complete-case count mismatch");
+	                    }
 	                    bootstrap_results = perform_bootstrap_resample_mediation_rng(
 	                        fit_m,
 	                        fit_y,
-	                        exposure,
-	                        mediator,
-	                        outcome,
+	                        exposure_obs,
+	                        mediator_obs,
+	                        outcome_obs,
 	                        fam_m,
 	                        fam_y,
 	                        n,
-	                        weights,
+	                        weights_obs,
 	                        replace_outcome,
 	                        &t0_result,
 	                        slice);
@@ -335,13 +414,20 @@ std::string MediationWorker::process_combination(std::size_t idx,
                                                  fam_y,
                                                  sigma2_m,
                                                  rng_t0,
-                                                 exposure,
-                                                 outcome,
-                                                 weights,
+                                                 exposure_obs,
+                                                 outcome_obs,
+                                                 weights_obs,
                                                  replace_outcome);
                 t0_ptr = &t0_result;
                 bootstrap_results = perform_bootstrap_resample(
-                    exposure, mediator, outcome, fam_m, fam_y, n, combination_seed_idx,
+                    exposure_obs,
+                    mediator_obs,
+                    outcome_obs,
+                    fam_m,
+                    fam_y,
+                    n,
+                    combination_seed_idx,
+                    weights_obs,
                     replace_outcome);
             }
         } else {
@@ -373,6 +459,7 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_asymptotic(
     uint64_t global_combination_idx,
     const Eigen::Ref<const VectorXd>& exposure_obs,
     const Eigen::Ref<const VectorXd>& outcome_obs,
+    const Eigen::Ref<const VectorXd>& weights_obs,
     bool replace_outcome_) {
     std::vector<BootstrapResult> results;
     results.reserve(nrep);
@@ -406,7 +493,7 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_asymptotic(
                                                rng,
                                                exposure_obs,
                                                outcome_obs,
-                                               weights,
+                                               weights_obs,
                                                replace_outcome_));
     }
 
@@ -421,6 +508,7 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_asymptotic_media
     int n,
     const Eigen::Ref<const VectorXd>& exposure_obs,
     const Eigen::Ref<const VectorXd>& outcome_obs,
+    const Eigen::Ref<const VectorXd>& weights_obs,
     bool replace_outcome_,
     const MatchMediationRngSlice& rng_slice) {
     std::vector<BootstrapResult> results;
@@ -476,7 +564,7 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_asymptotic_media
         mu_m0[s] = linkinv_mediation(eta0, fam_m);
     }
 
-    const double weight_sum = weights.sum();
+    const double weight_sum = weights_obs.sum();
     if (!(weight_sum > 0.0) || !std::isfinite(weight_sum)) {
         throw std::runtime_error(
             "perform_bootstrap_asymptotic_mediation: non-positive weight sum");
@@ -558,7 +646,7 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_asymptotic_media
                 }
             }
 
-            const double wi = weights[i];
+            const double wi = weights_obs[i];
             sum_y00 += wi * y00;
             sum_y01 += wi * y01;
             sum_y10 += wi * y10;
@@ -589,6 +677,7 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_asymptotic_media
     int n,
     const Eigen::Ref<const VectorXd>& exposure_obs,
     const Eigen::Ref<const VectorXd>& outcome_obs,
+    const Eigen::Ref<const VectorXd>& weights_obs,
     bool replace_outcome_) {
     std::vector<BootstrapResult> results;
     results.reserve(nrep);
@@ -626,7 +715,7 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_asymptotic_media
         mu_m0[s] = linkinv_mediation(eta0, GlmFamily::Poisson);
     }
 
-    const double weight_sum = weights.sum();
+    const double weight_sum = weights_obs.sum();
     if (!(weight_sum > 0.0) || !std::isfinite(weight_sum)) {
         throw std::runtime_error(
             "perform_bootstrap_asymptotic_mediation: non-positive weight sum");
@@ -684,7 +773,7 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_asymptotic_media
                 }
             }
 
-            const double wi = weights[i];
+            const double wi = weights_obs[i];
             sum_y00 += wi * y00;
             sum_y01 += wi * y01;
             sum_y10 += wi * y10;
@@ -716,6 +805,7 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_resample(
     GlmFamily fam_y,
     int n,
     uint64_t global_combination_idx,
+    const Eigen::Ref<const VectorXd>& weights_obs,
     bool replace_outcome_) {
     std::vector<BootstrapResult> results;
     results.reserve(nrep);
@@ -775,7 +865,7 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_resample(
                 boot_exposure[j] = exposure[sample_idx];
                 boot_mediator[j] = mediator[sample_idx];
                 boot_outcome[j] = outcome[sample_idx];
-                boot_weights[j] = weights[sample_idx];
+                boot_weights[j] = weights_obs[sample_idx];
             }
 
             X_med_boot.col(0).setOnes();
@@ -816,7 +906,7 @@ std::vector<BootstrapResult> MediationWorker::perform_bootstrap_resample(
                                                        rng,
                                                        exposure,
                                                        outcome,
-                                                       weights,
+                                                       weights_obs,
                                                        replace_outcome_));
                 success = true;
                 ++rep_idx;

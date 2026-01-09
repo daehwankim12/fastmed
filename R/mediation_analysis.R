@@ -70,6 +70,12 @@
 #' * All values are non-negative integers -> Poisson
 #' * Otherwise -> Gaussian
 #'
+#' Missing values are handled per combination: for each (exposure, mediator,
+#' outcome) triplet, rows with `NA`/`NaN` in any of those three variables are
+#' dropped prior to fitting and simulation/bootstrapping (complete-case analysis
+#' for that combination). If a combination has too few complete cases to fit the
+#' models, the corresponding output row is `NA`.
+#'
 #' Setting `replace.outcome = TRUE` replaces some simulated outcomes with
 #' observed outcomes and may reduce agreement with `mediation::mediate()`.
 #'
@@ -316,6 +322,7 @@ mediation_analysis <- function(data,
 
   validate_response_family <- function(y, family_name) {
     eps <- 1e-8
+    y <- y[!is.na(y)]
 
     if (family_name == "binomial") {
       if (any(!is.finite(y))) stop("Binomial y contains non-finite")
@@ -385,10 +392,6 @@ validate_data <- function(data) {
 
   if (nrow(data) == 0) {
     stop("Data is empty.")
-  }
-
-  if (anyNA(data)) {
-    stop("Data contains missing values. Remove or impute NAs before analysis.")
   }
 
   non_numeric_cols <- names(data)[!vapply(data, is.numeric, logical(1))]

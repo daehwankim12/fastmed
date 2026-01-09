@@ -100,11 +100,16 @@ static inline GlmFamily detect_family_from_y(const Eigen::Ref<const VectorXd>& y
     const double eps = 1e-8;
     bool all01 = true;
     bool all_nonneg_int = true;
+    int observed = 0;
     for (int i = 0; i < y.size(); ++i) {
         double v = y[i];
+        if (std::isnan(v)) {
+            continue;
+        }
         if (!std::isfinite(v)) {
             throw std::runtime_error("Auto-detect: non-finite y");
         }
+        ++observed;
         if (!(std::fabs(v) <= eps || std::fabs(v - 1.0) <= eps)) {
             all01 = false;
         }
@@ -116,6 +121,9 @@ static inline GlmFamily detect_family_from_y(const Eigen::Ref<const VectorXd>& y
                 all_nonneg_int = false;
             }
         }
+    }
+    if (observed == 0) {
+        throw std::runtime_error("Auto-detect: all y are missing");
     }
     if (all01) {
         return GlmFamily::Binomial;
@@ -188,7 +196,7 @@ static inline double deviance_glm(const Eigen::Ref<const VectorXd>& y,
     return dev;
 }
 
-static inline VectorXd wls_solve_qr(const MatrixXd& X,
+static inline VectorXd wls_solve_qr(const Eigen::Ref<const MatrixXd>& X,
                                     const Eigen::Ref<const VectorXd>& z,
                                     const Eigen::Ref<const VectorXd>& sqrt_w,
                                     double qr_tol,
@@ -213,7 +221,7 @@ static inline VectorXd wls_solve_qr(const MatrixXd& X,
     return qr.solve(zw);
 }
 
-static inline VectorXd wls_solve_qr_inplace(const MatrixXd& X,
+static inline VectorXd wls_solve_qr_inplace(const Eigen::Ref<const MatrixXd>& X,
                                             const Eigen::Ref<const VectorXd>& z,
                                             const Eigen::Ref<const VectorXd>& sqrt_w,
                                             double qr_tol,
@@ -241,7 +249,7 @@ static inline VectorXd wls_solve_qr_inplace(const MatrixXd& X,
     return qr.solve(zw);
 }
 
-static inline bool wls_solve_ldlt_smallp(const MatrixXd& X,
+static inline bool wls_solve_ldlt_smallp(const Eigen::Ref<const MatrixXd>& X,
                                         const Eigen::Ref<const VectorXd>& z,
                                         const Eigen::Ref<const VectorXd>& sqrt_w,
                                         double tol,
@@ -310,8 +318,8 @@ static inline bool wls_solve_ldlt_smallp(const MatrixXd& X,
     return true;
 }
 
-static inline MatrixXd xtwx_smallp(const MatrixXd& X,
-                                   const Eigen::Ref<const VectorXd>& w) {
+static inline MatrixXd xtwx_smallp(const Eigen::Ref<const MatrixXd>& X,
+                                  const Eigen::Ref<const VectorXd>& w) {
     const int n = static_cast<int>(X.rows());
     const int p = static_cast<int>(X.cols());
     if (p <= 0 || p > 3) {
@@ -344,7 +352,7 @@ static inline MatrixXd xtwx_smallp(const MatrixXd& X,
     return XtWX;
 }
 
-GlmFit glm_fit_irls_qr(const MatrixXd& X,
+GlmFit glm_fit_irls_qr(const Eigen::Ref<const MatrixXd>& X,
                        const Eigen::Ref<const VectorXd>& y,
                        GlmFamily fam,
                        const Eigen::Ref<const VectorXd>& prior_w,
@@ -619,7 +627,7 @@ GlmFit glm_fit_irls_qr(const MatrixXd& X,
     return fit;
 }
 
-GlmFit glm_fit_irls_qr(const MatrixXd& X,
+GlmFit glm_fit_irls_qr(const Eigen::Ref<const MatrixXd>& X,
                        const Eigen::Ref<const VectorXd>& y,
                        GlmFamily fam,
                        const Eigen::Ref<const VectorXd>& prior_w,

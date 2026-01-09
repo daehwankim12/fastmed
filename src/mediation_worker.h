@@ -75,7 +75,9 @@ private:
 	                                           Eigen::MatrixXd& X_med,
 	                                           Eigen::MatrixXd& X_out,
 	                                           Eigen::VectorXd& off_m,
-	                                           Eigen::VectorXd& off_y);
+	                                           Eigen::VectorXd& off_y,
+	                                           Eigen::VectorXd& outcome_obs_buf,
+	                                           Eigen::VectorXd& weights_obs_buf);
 
 		private:
 			    std::string format_na_row(const std::string& exposure_col,
@@ -86,7 +88,9 @@ private:
                                     Eigen::MatrixXd& X_med,
                                     Eigen::MatrixXd& X_out,
                                     Eigen::VectorXd& off_m,
-                                    Eigen::VectorXd& off_y);
+                                    Eigen::VectorXd& off_y,
+                                    Eigen::VectorXd& outcome_obs_buf,
+                                    Eigen::VectorXd& weights_obs_buf);
 
     std::vector<BootstrapResult> perform_bootstrap_asymptotic(
         const GlmFit& fit_m,
@@ -97,6 +101,7 @@ private:
         uint64_t global_combination_idx,
         const Eigen::Ref<const Eigen::VectorXd>& exposure_obs,
         const Eigen::Ref<const Eigen::VectorXd>& outcome_obs,
+        const Eigen::Ref<const Eigen::VectorXd>& weights_obs,
         bool replace_outcome_);
 
 	    std::vector<BootstrapResult> perform_bootstrap_asymptotic_mediation_rng(
@@ -107,6 +112,7 @@ private:
         int n,
         const Eigen::Ref<const Eigen::VectorXd>& exposure_obs,
         const Eigen::Ref<const Eigen::VectorXd>& outcome_obs,
+        const Eigen::Ref<const Eigen::VectorXd>& weights_obs,
 	        bool replace_outcome_,
 	        const MatchMediationRngSlice& rng_slice);
 
@@ -117,6 +123,7 @@ private:
 	        int n,
 	        const Eigen::Ref<const Eigen::VectorXd>& exposure_obs,
 	        const Eigen::Ref<const Eigen::VectorXd>& outcome_obs,
+	        const Eigen::Ref<const Eigen::VectorXd>& weights_obs,
 	        bool replace_outcome_);
 
 	    std::vector<BootstrapResult> perform_bootstrap_resample(
@@ -127,6 +134,7 @@ private:
         GlmFamily fam_y,
         int n,
         uint64_t global_combination_idx,
+        const Eigen::Ref<const Eigen::VectorXd>& weights_obs,
         bool replace_outcome_);
 
     std::vector<BootstrapResult> perform_bootstrap_resample_mediation_rng(

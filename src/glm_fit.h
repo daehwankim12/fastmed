@@ -22,7 +22,7 @@ struct GlmFit {
 GlmFamily parse_family_or_auto(const std::string& fam_str,
                                const Eigen::Ref<const VectorXd>& y);
 
-GlmFit glm_fit_irls_qr(const MatrixXd& X,
+GlmFit glm_fit_irls_qr(const Eigen::Ref<const MatrixXd>& X,
                        const Eigen::Ref<const VectorXd>& y,
                        GlmFamily fam,
                        const Eigen::Ref<const VectorXd>& prior_w,
@@ -31,7 +31,7 @@ GlmFit glm_fit_irls_qr(const MatrixXd& X,
                        double epsilon,
                        double qr_tol);
 
-GlmFit glm_fit_irls_qr(const MatrixXd& X,
+GlmFit glm_fit_irls_qr(const Eigen::Ref<const MatrixXd>& X,
                        const Eigen::Ref<const VectorXd>& y,
                        GlmFamily fam,
                        const Eigen::Ref<const VectorXd>& prior_w,

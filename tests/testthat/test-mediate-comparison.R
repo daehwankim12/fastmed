@@ -76,6 +76,64 @@ test_that("fastmed roughly matches mediation::mediate() for Gaussian/Gaussian (a
   check_effect("tau", fast, med_result$tau.coef, med_result$tau.ci, med_result$tau.p)
 })
 
+test_that("fastmed matches mediation::mediate() with NA omitted per combination", {
+  skip_if_not_installed("mediation")
+
+  data <- generate_mediation_data(
+    n = 220,
+    treat_family = "binary",
+    mediator_family = "gaussian",
+    outcome_family = "gaussian",
+    true_acme = 0.3,
+    true_ade = 0.4,
+    seed = 2024
+  )
+
+  set.seed(2024)
+  miss_idx <- sample.int(nrow(data), size = 12)
+  data$T[miss_idx] <- NA_real_
+  data$M[miss_idx] <- NA_real_
+
+  sims <- 300
+
+  med_model <- stats::lm(M ~ T, data = data)
+  out_model <- stats::lm(Y ~ M + T, data = data)
+  mediate_args <- list(
+    model.m = med_model,
+    model.y = out_model,
+    treat = "T",
+    mediator = "M",
+    sims = sims,
+    boot = FALSE
+  )
+  set.seed(2024)
+  mediate_formals <- names(formals(mediation::mediate))
+  if ("treat.value" %in% mediate_formals) mediate_args$treat.value <- 1
+  if ("control.value" %in% mediate_formals) mediate_args$control.value <- 0
+  med_result <- do.call(mediation::mediate, mediate_args)
+
+  output_csv <- withr::local_tempfile(fileext = ".csv")
+  mediation_analysis(
+    data = data,
+    columns = list(exposure = "T", mediator = "M", outcome = "Y"),
+    nrep = sims,
+    output_file = output_csv,
+    num_threads = 1,
+    pert = "asymptotic",
+    seed = 2024,
+    mediator.family = "gaussian",
+    outcome.family = "gaussian"
+  )
+  fast <- data.table::fread(output_csv)
+  expect_equal(nrow(fast), 1)
+
+  check_effect("d0", fast, med_result$d0, med_result$d0.ci, med_result$d0.p)
+  check_effect("d1", fast, med_result$d1, med_result$d1.ci, med_result$d1.p)
+  check_effect("z0", fast, med_result$z0, med_result$z0.ci, med_result$z0.p)
+  check_effect("z1", fast, med_result$z1, med_result$z1.ci, med_result$z1.p)
+  check_effect("tau", fast, med_result$tau.coef, med_result$tau.ci, med_result$tau.p)
+})
+
 test_that("fastmed roughly matches mediation::mediate() for Gaussian/Gaussian (bootstrap)", {
   skip_if_not_installed("mediation")
 

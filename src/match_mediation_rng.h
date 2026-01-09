@@ -11,6 +11,7 @@ inline constexpr std::size_t kMatchMediationNoOffset =
     std::numeric_limits<std::size_t>::max();
 
 struct MatchMediationRngSlice {
+    int n = 0;
     std::size_t coef_offset = kMatchMediationNoOffset;  // doubles
     MatchMediationNoiseKind noise_kind = MatchMediationNoiseKind::None;
     std::size_t noise_offset = kMatchMediationNoOffset;  // doubles
@@ -31,4 +32,3 @@ struct MatchMediationRngBlock {
     std::vector<double> noise_uniforms;
     std::vector<int> bootstrap_indices;
 };
-
