@@ -25,3 +25,7 @@ mediation_analysis_cpp <- function(data, column_names, exposure_col_idx, mediato
     invisible(.Call(`_fastmed_mediation_analysis_cpp`, data, column_names, exposure_col_idx, mediator_col_idx, outcome_col_idx, nrep, output_file, weights, pert, base_seed, mediator_family, outcome_family, replace_outcome, output_format, treat_value, control_value, chunk_size, grain_size, overwrite, excel_safe_csv, match_mediation, loop_order))
 }
 
+serial_path_analysis_cpp <- function(data, column_names, x_col_idx, mediator_col_idx_list, y_col_idx, m, nrep, output_fit_file, output_params_file, output_effects_file, base_seed = 0L, alpha = 0.05, combination_start = 0.0, combination_end = NA_real_, shard_id = 0L, shard_count = 1L, chunk_size = 1024L, grain_size = 1L, overwrite = TRUE, excel_safe_csv = FALSE, write_fit = TRUE, write_params = TRUE, write_effects = TRUE) {
+    invisible(.Call(`_fastmed_serial_path_analysis_cpp`, data, column_names, x_col_idx, mediator_col_idx_list, y_col_idx, m, nrep, output_fit_file, output_params_file, output_effects_file, base_seed, alpha, combination_start, combination_end, shard_id, shard_count, chunk_size, grain_size, overwrite, excel_safe_csv, write_fit, write_params, write_effects))
+}
+

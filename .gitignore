@@ -42,6 +42,7 @@ src/*.so
 .Rlib
 renv
 .renv_root
-
+AGENTS.md
 /doc/
 /Meta/
+.agent/

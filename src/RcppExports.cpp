@@ -109,6 +109,38 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// serial_path_analysis_cpp
+void serial_path_analysis_cpp(NumericMatrix data, CharacterVector column_names, IntegerVector x_col_idx, List mediator_col_idx_list, IntegerVector y_col_idx, int m, int nrep, std::string output_fit_file, std::string output_params_file, std::string output_effects_file, uint64_t base_seed, double alpha, double combination_start, double combination_end, uint64_t shard_id, uint64_t shard_count, int chunk_size, int grain_size, bool overwrite, bool excel_safe_csv, bool write_fit, bool write_params, bool write_effects);
+RcppExport SEXP _fastmed_serial_path_analysis_cpp(SEXP dataSEXP, SEXP column_namesSEXP, SEXP x_col_idxSEXP, SEXP mediator_col_idx_listSEXP, SEXP y_col_idxSEXP, SEXP mSEXP, SEXP nrepSEXP, SEXP output_fit_fileSEXP, SEXP output_params_fileSEXP, SEXP output_effects_fileSEXP, SEXP base_seedSEXP, SEXP alphaSEXP, SEXP combination_startSEXP, SEXP combination_endSEXP, SEXP shard_idSEXP, SEXP shard_countSEXP, SEXP chunk_sizeSEXP, SEXP grain_sizeSEXP, SEXP overwriteSEXP, SEXP excel_safe_csvSEXP, SEXP write_fitSEXP, SEXP write_paramsSEXP, SEXP write_effectsSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericMatrix >::type data(dataSEXP);
+    Rcpp::traits::input_parameter< CharacterVector >::type column_names(column_namesSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type x_col_idx(x_col_idxSEXP);
+    Rcpp::traits::input_parameter< List >::type mediator_col_idx_list(mediator_col_idx_listSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type y_col_idx(y_col_idxSEXP);
+    Rcpp::traits::input_parameter< int >::type m(mSEXP);
+    Rcpp::traits::input_parameter< int >::type nrep(nrepSEXP);
+    Rcpp::traits::input_parameter< std::string >::type output_fit_file(output_fit_fileSEXP);
+    Rcpp::traits::input_parameter< std::string >::type output_params_file(output_params_fileSEXP);
+    Rcpp::traits::input_parameter< std::string >::type output_effects_file(output_effects_fileSEXP);
+    Rcpp::traits::input_parameter< uint64_t >::type base_seed(base_seedSEXP);
+    Rcpp::traits::input_parameter< double >::type alpha(alphaSEXP);
+    Rcpp::traits::input_parameter< double >::type combination_start(combination_startSEXP);
+    Rcpp::traits::input_parameter< double >::type combination_end(combination_endSEXP);
+    Rcpp::traits::input_parameter< uint64_t >::type shard_id(shard_idSEXP);
+    Rcpp::traits::input_parameter< uint64_t >::type shard_count(shard_countSEXP);
+    Rcpp::traits::input_parameter< int >::type chunk_size(chunk_sizeSEXP);
+    Rcpp::traits::input_parameter< int >::type grain_size(grain_sizeSEXP);
+    Rcpp::traits::input_parameter< bool >::type overwrite(overwriteSEXP);
+    Rcpp::traits::input_parameter< bool >::type excel_safe_csv(excel_safe_csvSEXP);
+    Rcpp::traits::input_parameter< bool >::type write_fit(write_fitSEXP);
+    Rcpp::traits::input_parameter< bool >::type write_params(write_paramsSEXP);
+    Rcpp::traits::input_parameter< bool >::type write_effects(write_effectsSEXP);
+    serial_path_analysis_cpp(data, column_names, x_col_idx, mediator_col_idx_list, y_col_idx, m, nrep, output_fit_file, output_params_file, output_effects_file, base_seed, alpha, combination_start, combination_end, shard_id, shard_count, chunk_size, grain_size, overwrite, excel_safe_csv, write_fit, write_params, write_effects);
+    return R_NilValue;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_fastmed_fastmed_test_p_value_cpp", (DL_FUNC) &_fastmed_fastmed_test_p_value_cpp, 1},
@@ -117,6 +149,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastmed_fastmed_test_ols_sigmas_cpp", (DL_FUNC) &_fastmed_fastmed_test_ols_sigmas_cpp, 3},
     {"_fastmed_glm_fit_cpp", (DL_FUNC) &_fastmed_glm_fit_cpp, 8},
     {"_fastmed_mediation_analysis_cpp", (DL_FUNC) &_fastmed_mediation_analysis_cpp, 22},
+    {"_fastmed_serial_path_analysis_cpp", (DL_FUNC) &_fastmed_serial_path_analysis_cpp, 23},
     {NULL, NULL, 0}
 };
 

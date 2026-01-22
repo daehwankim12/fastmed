@@ -49,7 +49,9 @@ estimation. Options are `"asymptotic"` and `"bootstrap"`. Default is
 reproducible across thread counts within the same build/runtime
 environment.}
 
-\item{match_mediation}{Logical; if `TRUE`, align random number usage more closely with `mediation::mediate()` (seed handling is performed on the R side). Defaults to `!is.null(seed)`.}
+\item{match_mediation}{Logical; if `TRUE`, align random number usage more
+closely with `mediation::mediate()` (seed handling is performed on the R
+side). Defaults to `!is.null(seed)`.}
 
 \item{chunk_size}{Maximum number of (exposure, mediator, outcome) combinations
 to buffer per chunk inside the C++ backend. Smaller values reduce peak
@@ -118,6 +120,12 @@ Family auto-detection is based on the response values:
 * All values are 0/1 -> Binomial
 * All values are non-negative integers -> Poisson
 * Otherwise -> Gaussian
+
+Missing values are handled per combination: for each (exposure, mediator,
+outcome) triplet, rows with `NA`/`NaN` in any of those three variables are
+dropped prior to fitting and simulation/bootstrapping (complete-case analysis
+for that combination). If a combination has too few complete cases to fit the
+models, the corresponding output row is `NA`.
 
 Setting `replace.outcome = TRUE` replaces some simulated outcomes with
 observed outcomes and may reduce agreement with `mediation::mediate()`.
