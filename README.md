@@ -85,6 +85,7 @@ print(results)
 - `num_threads`: (Optional) Number of threads for parallel processing. Defaults to the number of available cores.
 - `pert`: (Optional) Uncertainty method, one of `"asymptotic"` or `"bootstrap"`. Default is `"asymptotic"`.
 - `seed`: (Optional) Non-negative integer seed for reproducible results across thread counts (within the same build/runtime environment).
+- `match_mediation`: (Optional) If `TRUE`, align RNG behavior with `mediation::mediate()`. Defaults to `!is.null(seed)` so the no-seed path stays on the fast mode.
 - `chunk_size`: (Optional) Maximum number of combinations to buffer per chunk inside the C++ backend; smaller values reduce peak memory usage for very large analyses.
 - `grain_size`: (Optional) Number of combinations per parallel task inside the C++ backend; larger values reduce scheduling overhead.
 - `mediator.family`: (Optional) Model family for the mediator regression: `"auto"`, `"gaussian"`, `"binomial"`, `"poisson"`.
@@ -114,6 +115,8 @@ Combination,d0_estimate,d0_ci_lower,d0_ci_upper,d0_p,d1_estimate,d1_ci_lower,d1_
 ### Reproducibility
 
 For schedule-independent reproducibility across different `num_threads` values, pass an explicit `seed`. Output row order is deterministic and follows the generated `(exposure, mediator, outcome)` combination order.
+If `seed = NULL` and `match_mediation = TRUE`, results follow the current R RNG stream (same pattern as `mediation::mediate()`).
+In `match_mediation = TRUE` mode, fastmed precomputes deterministic RNG slices and then distributes them by simulation index to parallel workers. Poisson-mediator combinations are kept serial in this mode to preserve mediate-compatible RNG behavior.
 
 ## Performance Considerations
 

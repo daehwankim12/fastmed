@@ -47,11 +47,11 @@ estimation. Options are `"asymptotic"` and `"bootstrap"`. Default is
 
 \item{seed}{Optional non-negative integer. If provided, results are
 reproducible across thread counts within the same build/runtime
-environment.}
+environment. When `match_mediation = TRUE` and `seed = NULL`, fastmed uses
+the current R RNG stream (it does not call `set.seed()` internally).}
 
 \item{match_mediation}{Logical; if `TRUE`, align random number usage more
-closely with `mediation::mediate()` (seed handling is performed on the R
-side). Defaults to `!is.null(seed)`.}
+closely with `mediation::mediate()`. Defaults to `!is.null(seed)`.}
 
 \item{chunk_size}{Maximum number of (exposure, mediator, outcome) combinations
 to buffer per chunk inside the C++ backend. Smaller values reduce peak
@@ -126,6 +126,8 @@ outcome) triplet, rows with `NA`/`NaN` in any of those three variables are
 dropped prior to fitting and simulation/bootstrapping (complete-case analysis
 for that combination). If a combination has too few complete cases to fit the
 models, the corresponding output row is `NA`.
+
+Infinite values (`Inf`, `-Inf`) are rejected at input validation time.
 
 Setting `replace.outcome = TRUE` replaces some simulated outcomes with
 observed outcomes and may reduce agreement with `mediation::mediate()`.

@@ -76,6 +76,119 @@ test_that("fastmed roughly matches mediation::mediate() for Gaussian/Gaussian (a
   check_effect("tau", fast, med_result$tau.coef, med_result$tau.ci, med_result$tau.p)
 })
 
+test_that("match_mediation=TRUE follows current R RNG stream when seed is NULL", {
+  skip_if_not_installed("mediation")
+
+  data <- generate_mediation_data(
+    n = 250,
+    treat_family = "binary",
+    mediator_family = "gaussian",
+    outcome_family = "gaussian",
+    true_acme = 0.3,
+    true_ade = 0.4,
+    seed = 4242
+  )
+
+  sims <- 700
+
+  med_model <- stats::lm(M ~ T, data = data)
+  out_model <- stats::lm(Y ~ M + T, data = data)
+  mediate_args <- list(
+    model.m = med_model,
+    model.y = out_model,
+    treat = "T",
+    mediator = "M",
+    sims = sims,
+    boot = FALSE
+  )
+  mediate_formals <- names(formals(mediation::mediate))
+  if ("treat.value" %in% mediate_formals) mediate_args$treat.value <- 1
+  if ("control.value" %in% mediate_formals) mediate_args$control.value <- 0
+
+  set.seed(2026)
+  med_result <- do.call(mediation::mediate, mediate_args)
+
+  output_csv <- withr::local_tempfile(fileext = ".csv")
+  set.seed(2026)
+  mediation_analysis(
+    data = data,
+    columns = list(exposure = "T", mediator = "M", outcome = "Y"),
+    nrep = sims,
+    output_file = output_csv,
+    num_threads = 1,
+    pert = "asymptotic",
+    seed = NULL,
+    match_mediation = TRUE,
+    mediator.family = "gaussian",
+    outcome.family = "gaussian"
+  )
+  fast <- data.table::fread(output_csv)
+  expect_equal(nrow(fast), 1)
+
+  check_effect("d0", fast, med_result$d0, med_result$d0.ci, med_result$d0.p)
+  check_effect("d1", fast, med_result$d1, med_result$d1.ci, med_result$d1.p)
+  check_effect("z0", fast, med_result$z0, med_result$z0.ci, med_result$z0.p)
+  check_effect("z1", fast, med_result$z1, med_result$z1.ci, med_result$z1.p)
+  check_effect("tau", fast, med_result$tau.coef, med_result$tau.ci, med_result$tau.p)
+})
+
+test_that("match_mediation=TRUE remains mediate-identical with parallel threads", {
+  skip_if_not_installed("mediation")
+  skip_if(parallel::detectCores(logical = FALSE) < 2,
+          "Need at least 2 physical cores for parallel test")
+
+  data <- generate_mediation_data(
+    n = 250,
+    treat_family = "binary",
+    mediator_family = "gaussian",
+    outcome_family = "gaussian",
+    true_acme = 0.3,
+    true_ade = 0.4,
+    seed = 4243
+  )
+
+  sims <- 900
+
+  med_model <- stats::lm(M ~ T, data = data)
+  out_model <- stats::lm(Y ~ M + T, data = data)
+  mediate_args <- list(
+    model.m = med_model,
+    model.y = out_model,
+    treat = "T",
+    mediator = "M",
+    sims = sims,
+    boot = FALSE
+  )
+  mediate_formals <- names(formals(mediation::mediate))
+  if ("treat.value" %in% mediate_formals) mediate_args$treat.value <- 1
+  if ("control.value" %in% mediate_formals) mediate_args$control.value <- 0
+
+  set.seed(4243)
+  med_result <- do.call(mediation::mediate, mediate_args)
+
+  output_csv <- withr::local_tempfile(fileext = ".csv")
+  mediation_analysis(
+    data = data,
+    columns = list(exposure = "T", mediator = "M", outcome = "Y"),
+    nrep = sims,
+    output_file = output_csv,
+    num_threads = 4,
+    pert = "asymptotic",
+    seed = 4243,
+    match_mediation = TRUE,
+    mediator.family = "gaussian",
+    outcome.family = "gaussian"
+  )
+  fast <- data.table::fread(output_csv)
+  expect_equal(nrow(fast), 1)
+
+  check_effect("d0", fast, med_result$d0, med_result$d0.ci, med_result$d0.p)
+  check_effect("d1", fast, med_result$d1, med_result$d1.ci, med_result$d1.p)
+  check_effect("z0", fast, med_result$z0, med_result$z0.ci, med_result$z0.p)
+  check_effect("z1", fast, med_result$z1, med_result$z1.ci, med_result$z1.p)
+  check_effect("tau", fast, med_result$tau.coef, med_result$tau.ci, med_result$tau.p)
+})
+
 test_that("fastmed matches mediation::mediate() with NA omitted per combination", {
   skip_if_not_installed("mediation")
 

@@ -725,3 +725,72 @@ test_that("output schema and row ordering are deterministic", {
   )
   expect_equal(results$Combination, expected_order)
 })
+
+test_that("infinite values are rejected at input validation", {
+  set.seed(123)
+  test_data <- data.table::data.table(
+    EXP1 = rnorm(50),
+    MED1 = rnorm(50),
+    OUT1 = rnorm(50)
+  )
+  test_data$MED1[3] <- Inf
+
+  output_csv <- withr::local_tempfile(fileext = ".csv")
+
+  expect_error(
+    mediation_analysis(
+      data = test_data,
+      columns = list(exposure = "EXP", mediator = "MED", outcome = "OUT"),
+      nrep = 10,
+      output_file = output_csv,
+      num_threads = 1
+    ),
+    regexp = "Infinite values found in columns"
+  )
+
+  test_data$MED1[3] <- -Inf
+
+  expect_error(
+    mediation_analysis(
+      data = test_data,
+      columns = list(exposure = "EXP", mediator = "MED", outcome = "OUT"),
+      nrep = 10,
+      output_file = output_csv,
+      num_threads = 1
+    ),
+    regexp = "Infinite values found in columns"
+  )
+})
+
+test_that("empty or NA prefix tokens are rejected", {
+  set.seed(123)
+  test_data <- data.table::data.table(
+    EXP1 = rnorm(50),
+    MED1 = rnorm(50),
+    OUT1 = rnorm(50)
+  )
+
+  output_csv <- withr::local_tempfile(fileext = ".csv")
+
+  expect_error(
+    mediation_analysis(
+      data = test_data,
+      columns = list(exposure = c(""), mediator = "MED", outcome = "OUT"),
+      nrep = 10,
+      output_file = output_csv,
+      num_threads = 1
+    ),
+    regexp = "must not contain NA or empty strings"
+  )
+
+  expect_error(
+    mediation_analysis(
+      data = test_data,
+      columns = list(exposure = "EXP", mediator = NA_character_, outcome = "OUT"),
+      nrep = 10,
+      output_file = output_csv,
+      num_threads = 1
+    ),
+    regexp = "must not contain NA or empty strings"
+  )
+})

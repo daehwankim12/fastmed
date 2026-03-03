@@ -28,10 +28,10 @@
 #'   `"asymptotic"`.
 #' @param seed Optional non-negative integer. If provided, results are
 #'   reproducible across thread counts within the same build/runtime
-#'   environment.
+#'   environment. When `match_mediation = TRUE` and `seed = NULL`, fastmed uses
+#'   the current R RNG stream (it does not call `set.seed()` internally).
 #' @param match_mediation Logical; if `TRUE`, align random number usage more
-#'   closely with `mediation::mediate()` (seed handling is performed on the R
-#'   side). Defaults to `!is.null(seed)`.
+#'   closely with `mediation::mediate()`. Defaults to `!is.null(seed)`.
 #' @param chunk_size Maximum number of (exposure, mediator, outcome) combinations
 #'   to buffer per chunk inside the C++ backend. Smaller values reduce peak
 #'   memory usage for very large analyses. Default is 10000.
@@ -75,6 +75,8 @@
 #' dropped prior to fitting and simulation/bootstrapping (complete-case analysis
 #' for that combination). If a combination has too few complete cases to fit the
 #' models, the corresponding output row is `NA`.
+#'
+#' Infinite values (`Inf`, `-Inf`) are rejected at input validation time.
 #'
 #' Setting `replace.outcome = TRUE` replaces some simulated outcomes with
 #' observed outcomes and may reduce agreement with `mediation::mediate()`.
@@ -289,12 +291,17 @@ mediation_analysis <- function(data,
       stop("seed must be an integer.")
     }
     base_seed <- as.integer(seed)
-  } else {
+    if (match_mediation) {
+      set.seed(base_seed)
+    }
+  } else if (!match_mediation) {
     base_seed <- sample.int(.Machine$integer.max, 1)
-  }
-
-  if (match_mediation) {
-    set.seed(base_seed)
+  } else {
+    # In mediate-parity mode with no explicit seed, consume the current R RNG
+    # stream exactly as-is (no internal reseeding).  base_seed is a sentinel
+    # (ignored by the C++ match_mediation path, which uses precomputed R-side
+    # RNG draws instead of derive_seed()).
+    base_seed <- 0L
   }
 
   overwrite <- isTRUE(overwrite)
@@ -403,6 +410,17 @@ validate_data <- function(data) {
     ))
   }
 
+  non_finite_cols <- names(data)[vapply(data, function(col) {
+    any(is.infinite(col))
+  }, logical(1))]
+  if (length(non_finite_cols) > 0) {
+    stop(paste0(
+      "Infinite values found in columns: ",
+      paste(non_finite_cols, collapse = ", "),
+      ". Replace Inf/-Inf with NA or finite values."
+    ))
+  }
+
   invisible(TRUE)
 }
 
@@ -421,6 +439,9 @@ validate_columns <- function(columns) {
     prefixes <- columns[[type_name]]
     if (!is.character(prefixes) || length(prefixes) < 1) {
       stop(paste0("columns$", type_name, " must be a non-empty character vector of prefixes."))
+    }
+    if (anyNA(prefixes) || any(!nzchar(prefixes))) {
+      stop(paste0("columns$", type_name, " must not contain NA or empty strings."))
     }
   }
 
