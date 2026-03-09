@@ -28,10 +28,13 @@
 #'   `"asymptotic"`.
 #' @param seed Optional non-negative integer. If provided, results are
 #'   reproducible across thread counts within the same build/runtime
-#'   environment. When `match_mediation = TRUE` and `seed = NULL`, fastmed uses
+#'   environment. When `rng_mode = "mediate"` and `seed = NULL`, fastmed uses
 #'   the current R RNG stream (it does not call `set.seed()` internally).
-#' @param match_mediation Logical; if `TRUE`, align random number usage more
-#'   closely with `mediation::mediate()`. Defaults to `!is.null(seed)`.
+#' @param match_mediation Deprecated alias for `rng_mode`. If supplied, it
+#'   overrides `rng_mode`.
+#' @param rng_mode Random number mode. `"fast"` uses fast deterministic
+#'   per-combination seeding; `"mediate"` aligns random number usage more
+#'   closely with `mediation::mediate()`. Default is `"fast"`.
 #' @param chunk_size Maximum number of (exposure, mediator, outcome) combinations
 #'   to buffer per chunk inside the C++ backend. Smaller values reduce peak
 #'   memory usage for very large analyses. Default is 10000.
@@ -53,6 +56,11 @@
 #'   effect columns (`d0`, `d1`, `z0`, `z1`, `tau`). `"legacy"` writes the
 #'   previous schema (`ACME_*`, `ADE_*`, `Total_Effect_*`). Default is
 #'   `"mediate"`.
+#' @param failure_mode How to handle failing combinations. `"na_row"` writes an
+#'   `NA` row (default). `"error"` stops immediately with an error.
+#' @param include_failure_reason Logical; if `TRUE`, add a `failure_reason`
+#'   column to the output CSV (`NA` for successful rows, reason text for
+#'   failed rows). Default is `FALSE`.
 #' @return None.  The results are written to the specified `output_file` in CSV format.
 #'
 #' @details This function estimates the following effects:
@@ -80,6 +88,9 @@
 #'
 #' Setting `replace.outcome = TRUE` replaces some simulated outcomes with
 #' observed outcomes and may reduce agreement with `mediation::mediate()`.
+#'
+#' If `failure_mode = "na_row"`, failing combinations are kept in output as
+#' `NA` rows. If `failure_mode = "error"`, analysis stops on first failure.
 #'
 #' @examples
 #' \dontrun{
@@ -114,7 +125,8 @@ mediation_analysis <- function(data,
                                num_threads = parallel::detectCores(),
                                pert = "asymptotic",
                                seed = NULL,
-                               match_mediation = !is.null(seed),
+                               match_mediation = NULL,
+                               rng_mode = c("fast", "mediate"),
                                chunk_size = 10000,
                                grain_size = 100,
                                loop_order = c("exposure", "mediator", "outcome"),
@@ -126,7 +138,9 @@ mediation_analysis <- function(data,
                                treat.value = 1,
                                control.value = 0,
                                overwrite = TRUE,
-                               excel_safe_csv = FALSE) {
+                               excel_safe_csv = FALSE,
+                               failure_mode = c("na_row", "error"),
+                               include_failure_reason = FALSE) {
   if (!is.numeric(nrep) || length(nrep) != 1 || is.na(nrep) || nrep <= 0) {
     stop("nrep must be a positive integer.")
   }
@@ -152,10 +166,18 @@ mediation_analysis <- function(data,
     stop("pert must be one of: 'asymptotic', 'bootstrap'.")
   }
 
-  if (!is.logical(match_mediation) || length(match_mediation) != 1L || is.na(match_mediation)) {
-    stop("match_mediation must be TRUE or FALSE.")
+  rng_mode <- match.arg(rng_mode)
+  if (!is.null(match_mediation)) {
+    if (!is.logical(match_mediation) || length(match_mediation) != 1L || is.na(match_mediation)) {
+      stop("match_mediation must be TRUE, FALSE, or NULL.")
+    }
+    warning(
+      "match_mediation is deprecated; use rng_mode = 'mediate' or 'fast' instead.",
+      call. = FALSE
+    )
+    rng_mode <- if (isTRUE(match_mediation)) "mediate" else "fast"
   }
-  match_mediation <- isTRUE(match_mediation)
+  match_mediation_cpp <- identical(rng_mode, "mediate")
 
   if (!is.numeric(chunk_size) || length(chunk_size) != 1 || is.na(chunk_size) || chunk_size <= 0) {
     stop("chunk_size must be a positive integer.")
@@ -227,6 +249,10 @@ mediation_analysis <- function(data,
   }
 
   output.format <- match.arg(output.format)
+  failure_mode <- match.arg(failure_mode)
+  if (!is.logical(include_failure_reason) || length(include_failure_reason) != 1L || is.na(include_failure_reason)) {
+    stop("include_failure_reason must be TRUE or FALSE.")
+  }
 
   validate_data(data)
   validate_columns(columns)
@@ -291,10 +317,10 @@ mediation_analysis <- function(data,
       stop("seed must be an integer.")
     }
     base_seed <- as.integer(seed)
-    if (match_mediation) {
+    if (match_mediation_cpp) {
       set.seed(base_seed)
     }
-  } else if (!match_mediation) {
+  } else if (!match_mediation_cpp) {
     base_seed <- sample.int(.Machine$integer.max, 1)
   } else {
     # In mediate-parity mode with no explicit seed, consume the current R RNG
@@ -385,8 +411,10 @@ mediation_analysis <- function(data,
     grain_size = grain_size,
     overwrite = overwrite,
     excel_safe_csv = excel_safe_csv,
-    match_mediation = match_mediation,
-    loop_order = loop_order_cpp
+    match_mediation = match_mediation_cpp,
+    loop_order = loop_order_cpp,
+    fail_fast = identical(failure_mode, "error"),
+    include_failure_reason = isTRUE(include_failure_reason)
   )
 
   cat("Mediation analysis completed. Results saved to", output_file, "\n")

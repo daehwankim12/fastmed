@@ -1,4 +1,4 @@
-test_that("loop_order changes output order without changing estimates (match_mediation = FALSE)", {
+test_that("loop_order changes output order without changing estimates (rng_mode = 'fast')", {
   set.seed(123)
   n <- 80
   test_data <- data.table::data.table(
@@ -21,7 +21,7 @@ test_that("loop_order changes output order without changing estimates (match_med
     num_threads = 1,
     pert = "asymptotic",
     seed = 1,
-    match_mediation = FALSE,
+    rng_mode = "fast",
     loop_order = "EMO"
   )
 
@@ -33,7 +33,7 @@ test_that("loop_order changes output order without changing estimates (match_med
     num_threads = 1,
     pert = "asymptotic",
     seed = 1,
-    match_mediation = FALSE,
+    rng_mode = "fast",
     loop_order = "MEO"
   )
 
@@ -55,4 +55,3 @@ test_that("loop_order changes output order without changing estimates (match_med
     expect_equal(results_emo[[col]], results_meo[[col]], tolerance = 1e-12)
   }
 })
-

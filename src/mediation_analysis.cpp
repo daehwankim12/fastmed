@@ -316,7 +316,9 @@ void mediation_analysis_cpp(NumericMatrix data,
                             bool overwrite = true,
                             bool excel_safe_csv = false,
                             bool match_mediation = false,
-                            std::string loop_order = "exposure_mediator_outcome") {
+                            std::string loop_order = "exposure_mediator_outcome",
+                            bool fail_fast = false,
+                            bool include_failure_reason = false) {
     try {
         if (data.nrow() == 0 || data.ncol() == 0) {
             throw std::invalid_argument("Data matrix is empty");
@@ -515,13 +517,21 @@ void mediation_analysis_cpp(NumericMatrix data,
         std::string header;
         if (legacy_output_schema) {
             header =
-                "Combination,ACME_Mean,ACME_2.5%,ACME_97.5%,ACME_p-value,"
+                "Combination,";
+            if (include_failure_reason) {
+                header += "failure_reason,";
+            }
+            header += "ACME_Mean,ACME_2.5%,ACME_97.5%,ACME_p-value,"
                 "ADE_Mean,ADE_2.5%,ADE_97.5%,ADE_p-value,"
                 "Total_Effect_Mean,Total_Effect_2.5%,Total_Effect_97.5%,Total_"
                 "Effect_p-value\n";
         } else {
             header =
-                "Combination,"
+                "Combination,";
+            if (include_failure_reason) {
+                header += "failure_reason,";
+            }
+            header +=
                 "d0_estimate,d0_ci_lower,d0_ci_upper,d0_p,"
                 "d1_estimate,d1_ci_lower,d1_ci_upper,d1_p,"
                 "z0_estimate,z0_ci_lower,z0_ci_upper,z0_p,"
@@ -566,6 +576,8 @@ void mediation_analysis_cpp(NumericMatrix data,
                                               base_seed,
                                               match_mediation,
                                               loop_order_cpp,
+                                              fail_fast,
+                                              include_failure_reason,
                                               chunk_begin,
                                               chunk_results,
                                               nullptr);
@@ -719,6 +731,8 @@ void mediation_analysis_cpp(NumericMatrix data,
                                            base_seed,
                                            match_mediation,
                                            loop_order_cpp,
+                                           fail_fast,
+                                           include_failure_reason,
                                            chunk_begin,
                                            chunk_results,
                                            &rng_block);
@@ -748,6 +762,8 @@ void mediation_analysis_cpp(NumericMatrix data,
                                        base_seed,
                                        match_mediation,
                                        loop_order_cpp,
+                                       fail_fast,
+                                       include_failure_reason,
                                        chunk_begin,
                                        chunk_results,
                                        nullptr);

@@ -108,3 +108,136 @@ test_that("absurdly large nrep errors early", {
   )
 })
 
+test_that("failure_mode='error' stops on failing combinations", {
+  set.seed(11)
+  n <- 60
+  dt <- data.table::data.table(
+    EXP1 = rep(0, n),
+    MED1 = stats::rnorm(n),
+    OUT1 = stats::rnorm(n)
+  )
+
+  output_csv <- withr::local_tempfile(fileext = ".csv")
+  expect_error(
+    mediation_analysis(
+      data = dt,
+      columns = list(exposure = c("EXP"), mediator = c("MED"), outcome = c("OUT")),
+      nrep = 10,
+      output_file = output_csv,
+      num_threads = 1,
+      seed = 1,
+      failure_mode = "error"
+    ),
+    regexp = "failed"
+  )
+})
+
+test_that("include_failure_reason annotates failed mediation rows", {
+  set.seed(12)
+  n <- 100
+  dt <- data.table::data.table(
+    EXP1 = stats::rbinom(n, 1, 0.5),
+    MED_good = stats::rnorm(n),
+    MED_bad = rep(0, n),
+    OUT1 = stats::rnorm(n)
+  )
+
+  output_csv <- withr::local_tempfile(fileext = ".csv")
+  mediation_analysis(
+    data = dt,
+    columns = list(exposure = c("EXP"), mediator = c("MED"), outcome = c("OUT")),
+    nrep = 20,
+    output_file = output_csv,
+    num_threads = 1,
+    seed = 2,
+    include_failure_reason = TRUE
+  )
+
+  results <- data.table::fread(output_csv)
+  expect_true("failure_reason" %in% names(results))
+  expect_equal(nrow(results), 2)
+
+  failed <- results[is.na(d0_estimate)]
+  succeeded <- results[!is.na(d0_estimate)]
+
+  expect_true(nrow(failed) >= 1)
+  expect_true(all(!is.na(failed$failure_reason)))
+  expect_true(all(is.na(succeeded$failure_reason)))
+})
+
+test_that("default rng_mode with seed is equivalent to explicit rng_mode='fast'", {
+  set.seed(13)
+  n <- 80
+  dt <- data.table::data.table(
+    EXP1 = stats::rbinom(n, 1, 0.5),
+    MED1 = stats::rnorm(n),
+    OUT1 = stats::rnorm(n)
+  )
+
+  out_default <- withr::local_tempfile(fileext = ".csv")
+  out_fast <- withr::local_tempfile(fileext = ".csv")
+
+  mediation_analysis(
+    data = dt,
+    columns = list(exposure = c("EXP"), mediator = c("MED"), outcome = c("OUT")),
+    nrep = 30,
+    output_file = out_default,
+    num_threads = 1,
+    seed = 7
+  )
+
+  mediation_analysis(
+    data = dt,
+    columns = list(exposure = c("EXP"), mediator = c("MED"), outcome = c("OUT")),
+    nrep = 30,
+    output_file = out_fast,
+    num_threads = 1,
+    seed = 7,
+    rng_mode = "fast"
+  )
+
+  res_default <- data.table::fread(out_default)
+  res_fast <- data.table::fread(out_fast)
+  expect_equal(res_default, res_fast, tolerance = 1e-12)
+})
+
+test_that("match_mediation is deprecated but overrides rng_mode", {
+  set.seed(14)
+  n <- 120
+  dt <- data.table::data.table(
+    EXP1 = stats::rbinom(n, 1, 0.5),
+    MED1 = stats::rnorm(n),
+    OUT1 = stats::rnorm(n)
+  )
+
+  out_alias <- withr::local_tempfile(fileext = ".csv")
+  out_mode <- withr::local_tempfile(fileext = ".csv")
+
+  expect_warning(
+    mediation_analysis(
+      data = dt,
+      columns = list(exposure = c("EXP"), mediator = c("MED"), outcome = c("OUT")),
+      nrep = 25,
+      output_file = out_alias,
+      num_threads = 1,
+      seed = 9,
+      rng_mode = "fast",
+      match_mediation = TRUE
+    ),
+    regexp = "deprecated"
+  )
+
+  mediation_analysis(
+    data = dt,
+    columns = list(exposure = c("EXP"), mediator = c("MED"), outcome = c("OUT")),
+    nrep = 25,
+    output_file = out_mode,
+    num_threads = 1,
+    seed = 9,
+    rng_mode = "mediate"
+  )
+
+  res_alias <- data.table::fread(out_alias)
+  res_mode <- data.table::fread(out_mode)
+  expect_equal(res_alias, res_mode, tolerance = 1e-12)
+})

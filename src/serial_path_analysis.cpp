@@ -843,6 +843,7 @@ struct SerialPathWorker : public RcppParallel::Worker {
     const bool write_fit;
     const bool write_params;
     const bool write_effects;
+    const bool include_failure_reason;
 
     std::vector<std::string>& fit_lines;
     std::vector<std::string>& param_lines;
@@ -865,6 +866,7 @@ struct SerialPathWorker : public RcppParallel::Worker {
                      bool write_fit_,
                      bool write_params_,
                      bool write_effects_,
+                     bool include_failure_reason_,
                      std::vector<std::string>& fit_lines_,
                      std::vector<std::string>& param_lines_,
                      std::vector<std::string>& effect_lines_)
@@ -885,6 +887,7 @@ struct SerialPathWorker : public RcppParallel::Worker {
           write_fit(write_fit_),
           write_params(write_params_),
           write_effects(write_effects_),
+          include_failure_reason(include_failure_reason_),
           fit_lines(fit_lines_),
           param_lines(param_lines_),
           effect_lines(effect_lines_) {}
@@ -928,7 +931,7 @@ struct SerialPathWorker : public RcppParallel::Worker {
         const std::string combination_id = build_combination_id(x_name, m_names, y_name);
         const std::string m_vars = build_m_vars_field(m_names);
 
-        auto write_failed_fit_row = [&](int n_complete) {
+        auto write_failed_fit_row = [&](int n_complete, const std::string& failure_reason) {
             if (!write_fit) {
                 return;
             }
@@ -947,6 +950,10 @@ struct SerialPathWorker : public RcppParallel::Worker {
             append_csv_int(out, n_complete);
             out.push_back(',');
             out += "NA";  // selected_model
+            if (include_failure_reason) {
+                out.push_back(',');
+                out += csv_escape(failure_reason, excel_safe_csv);
+            }
             // Remaining columns: p-values and fit measures
             const int na_cols = 2 /*pvals*/ + 3 * 7 /*fit blocks*/;
             for (int k = 0; k < na_cols; ++k) {
@@ -968,14 +975,14 @@ struct SerialPathWorker : public RcppParallel::Worker {
                 }
             }
             if (dup) {
-                write_failed_fit_row(NA_INTEGER);
+                write_failed_fit_row(NA_INTEGER, "duplicate_columns");
                 return;
             }
         }
 
         const int n_total = static_cast<int>(data.rows());
         if (n_total <= 0) {
-            write_failed_fit_row(NA_INTEGER);
+            write_failed_fit_row(NA_INTEGER, "empty_data");
             return;
         }
 
@@ -1000,7 +1007,7 @@ struct SerialPathWorker : public RcppParallel::Worker {
         }
 
         if (n_complete < p + 1) {
-            write_failed_fit_row(n_complete);
+            write_failed_fit_row(n_complete, "insufficient_complete_cases");
             return;
         }
 
@@ -1044,7 +1051,7 @@ struct SerialPathWorker : public RcppParallel::Worker {
         double chisq_baseline = NA_REAL;
         const int df_baseline = (p * (p - 1)) / 2;
         if (!compute_baseline_chisq(buf.S, n_complete, &chisq_baseline)) {
-            write_failed_fit_row(n_complete);
+            write_failed_fit_row(n_complete, "baseline_fit_failed");
             return;
         }
 
@@ -1052,15 +1059,15 @@ struct SerialPathWorker : public RcppParallel::Worker {
         DynamicPathFit fit_semifull;
         DynamicPathFit fit_full;
         if (!fit_dynamic_path_model(buf.S, n_complete, m, PathModelType::Partial, buf, &fit_partial)) {
-            write_failed_fit_row(n_complete);
+            write_failed_fit_row(n_complete, "partial_model_fit_failed");
             return;
         }
         if (!fit_dynamic_path_model(buf.S, n_complete, m, PathModelType::Semifull, buf, &fit_semifull)) {
-            write_failed_fit_row(n_complete);
+            write_failed_fit_row(n_complete, "semifull_model_fit_failed");
             return;
         }
         if (!fit_dynamic_path_model(buf.S, n_complete, m, PathModelType::Full, buf, &fit_full)) {
-            write_failed_fit_row(n_complete);
+            write_failed_fit_row(n_complete, "full_model_fit_failed");
             return;
         }
 
@@ -1072,7 +1079,7 @@ struct SerialPathWorker : public RcppParallel::Worker {
                                           chisq_baseline,
                                           df_baseline,
                                           &fit_partial)) {
-            write_failed_fit_row(n_complete);
+            write_failed_fit_row(n_complete, "partial_fit_measures_failed");
             return;
         }
         if (!compute_dynamic_fit_measures(buf.S,
@@ -1083,7 +1090,7 @@ struct SerialPathWorker : public RcppParallel::Worker {
                                           chisq_baseline,
                                           df_baseline,
                                           &fit_semifull)) {
-            write_failed_fit_row(n_complete);
+            write_failed_fit_row(n_complete, "semifull_fit_measures_failed");
             return;
         }
         if (!compute_dynamic_fit_measures(buf.S,
@@ -1094,7 +1101,7 @@ struct SerialPathWorker : public RcppParallel::Worker {
                                           chisq_baseline,
                                           df_baseline,
                                           &fit_full)) {
-            write_failed_fit_row(n_complete);
+            write_failed_fit_row(n_complete, "full_fit_measures_failed");
             return;
         }
 
@@ -1272,6 +1279,9 @@ struct SerialPathWorker : public RcppParallel::Worker {
             append_csv_int(out, n_complete);
             out.push_back(',');
             out += csv_escape(selected_label, excel_safe_csv);
+            if (include_failure_reason) {
+                out += ",NA";
+            }
             out.push_back(',');
             append_csv_double_fixed6(out, p_P_vs_SF);
             out.push_back(',');
@@ -1450,7 +1460,8 @@ void serial_path_analysis_cpp(NumericMatrix data,
                               bool excel_safe_csv = false,
                               bool write_fit = true,
                               bool write_params = true,
-                              bool write_effects = true) {
+                              bool write_effects = true,
+                              bool include_failure_reason = false) {
     if (data.nrow() == 0 || data.ncol() == 0) {
         throw std::invalid_argument("Data matrix is empty");
     }
@@ -1597,7 +1608,12 @@ void serial_path_analysis_cpp(NumericMatrix data,
     if (write_fit) {
         fit_stream = open_for_write(output_fit_file);
         fit_stream <<
-            "Combination,X_var,Y_var,M_vars,m,N_complete,selected_model,p_P_vs_SF,p_SF_vs_F,"
+            "Combination,X_var,Y_var,M_vars,m,N_complete,selected_model,";
+        if (include_failure_reason) {
+            fit_stream << "failure_reason,";
+        }
+        fit_stream <<
+            "p_P_vs_SF,p_SF_vs_F,"
             "partial_chisq,partial_df,partial_p,partial_cfi,partial_tli,partial_rmsea,partial_aic,"
             "semifull_chisq,semifull_df,semifull_p,semifull_cfi,semifull_tli,semifull_rmsea,semifull_aic,"
             "full_chisq,full_df,full_p,full_cfi,full_tli,full_rmsea,full_aic\n";
@@ -1645,6 +1661,7 @@ void serial_path_analysis_cpp(NumericMatrix data,
                                 write_fit,
                                 write_params,
                                 write_effects,
+                                include_failure_reason,
                                 fit_lines,
                                 param_lines,
                                 effect_lines);

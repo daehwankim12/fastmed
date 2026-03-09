@@ -438,6 +438,46 @@ test_that("duplicate columns in a combination yield a failed (NA) fit row", {
   expect_true(is.na(fit$selected_model[[1]]))
 })
 
+test_that("include_failure_reason annotates failed and successful fit rows", {
+  skip_if_not_installed("data.table")
+
+  set.seed(81)
+  n <- 120
+  X <- rnorm(n)
+  M1 <- 0.5 * X + rnorm(n)
+  M2 <- 0.4 * X + 0.6 * M1 + rnorm(n)
+  Y <- 0.2 * X + 0.3 * M1 + 0.4 * M2 + rnorm(n)
+  df <- data.frame(X = X, M1 = M1, M2 = M2, Y = Y)
+
+  tmp <- tempfile("serial_path_failure_reason_")
+  out_dir <- dirname(tmp)
+  out_prefix <- basename(tmp)
+
+  serial_path_analysis(
+    data = df,
+    columns = list(x = "X", mediators = list(m1 = c("X", "M1"), m2 = "M2"), y = "Y"),
+    output_dir = out_dir,
+    output_prefix = out_prefix,
+    nrep = 0,
+    num_threads = 1,
+    seed = 1,
+    match = "exact",
+    overwrite = TRUE,
+    include_failure_reason = TRUE,
+    output = "fit"
+  )
+
+  fit <- data.table::fread(file.path(out_dir, paste0(out_prefix, "_fit.csv")))
+  expect_true("failure_reason" %in% names(fit))
+  expect_equal(nrow(fit), 2)
+
+  failed <- fit[is.na(selected_model)]
+  succeeded <- fit[!is.na(selected_model)]
+  expect_equal(nrow(failed), 1)
+  expect_equal(failed$failure_reason[[1]], "duplicate_columns")
+  expect_true(all(is.na(succeeded$failure_reason)))
+})
+
 test_that("sharding partitions global indices deterministically", {
   skip_if_not_installed("data.table")
 

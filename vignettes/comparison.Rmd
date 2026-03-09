@@ -20,9 +20,10 @@ minimal workflow for comparisons.
 
 1. **Randomness / simulation draws**
 
-   Even with the same seed, `fastmed` and `mediation` use different RNG
-   implementations and may schedule work differently (threads), so individual
-   simulation draws will not match.
+   In the default `rng_mode = "fast"`, `fastmed` uses per-combination
+   deterministic seeding for speed, so individual simulation draws differ from
+   `mediation`. Use `rng_mode = "mediate"` (or deprecated
+   `match_mediation = TRUE`) when you need mediate-style RNG alignment.
 
 2. **Percentile confidence intervals**
 
@@ -44,9 +45,9 @@ minimal workflow for comparisons.
 
 5. **Treat/control values**
 
-   The C++ backend currently defines effects as contrasts between `T = 0` and
-   `T = 1`. For binary treatments coded {0,1}, this matches the common
-   `control.value = 0`, `treat.value = 1` convention in `mediation`.
+   `fastmed` supports arbitrary `treat.value` and `control.value` (must be
+   finite and different). For binary treatments coded `{0,1}`, this matches the
+   common `control.value = 0`, `treat.value = 1` convention in `mediation`.
 
 6. **Optional `replace.outcome`**
 
@@ -89,6 +90,7 @@ if (requireNamespace("mediation", quietly = TRUE)) {
     columns = list(exposure = "T", mediator = "M", outcome = "Y"),
     nrep = 400,
     pert = "asymptotic",
+    rng_mode = "mediate",
     seed = 42,
     num_threads = 1,
     mediator.family = "gaussian",
@@ -101,4 +103,3 @@ if (requireNamespace("mediation", quietly = TRUE)) {
   list(mediation = med_res, fastmed = fast_res)
 }
 ```
-

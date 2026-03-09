@@ -23,6 +23,14 @@ check_effect <- function(effect, fast, med_est, med_ci, med_p, tol = 1e-6) {
   expect_true(abs(fast_p - med_p) <= tol, info = paste(effect, "p-value mismatch"))
 }
 
+mediation_analysis_for_comparison <- function(...) {
+  args <- list(...)
+  if (is.null(args$rng_mode) && is.null(args$match_mediation)) {
+    args$rng_mode <- "mediate"
+  }
+  do.call(mediation_analysis, args)
+}
+
 test_that("fastmed roughly matches mediation::mediate() for Gaussian/Gaussian (asymptotic)", {
   skip_if_not_installed("mediation")
 
@@ -55,7 +63,7 @@ test_that("fastmed roughly matches mediation::mediate() for Gaussian/Gaussian (a
   med_result <- do.call(mediation::mediate, mediate_args)
 
   output_csv <- withr::local_tempfile(fileext = ".csv")
-  mediation_analysis(
+  mediation_analysis_for_comparison(
     data = data,
     columns = list(exposure = "T", mediator = "M", outcome = "Y"),
     nrep = sims,
@@ -76,7 +84,7 @@ test_that("fastmed roughly matches mediation::mediate() for Gaussian/Gaussian (a
   check_effect("tau", fast, med_result$tau.coef, med_result$tau.ci, med_result$tau.p)
 })
 
-test_that("match_mediation=TRUE follows current R RNG stream when seed is NULL", {
+test_that("rng_mode='mediate' follows current R RNG stream when seed is NULL", {
   skip_if_not_installed("mediation")
 
   data <- generate_mediation_data(
@@ -110,7 +118,7 @@ test_that("match_mediation=TRUE follows current R RNG stream when seed is NULL",
 
   output_csv <- withr::local_tempfile(fileext = ".csv")
   set.seed(2026)
-  mediation_analysis(
+  mediation_analysis_for_comparison(
     data = data,
     columns = list(exposure = "T", mediator = "M", outcome = "Y"),
     nrep = sims,
@@ -118,7 +126,7 @@ test_that("match_mediation=TRUE follows current R RNG stream when seed is NULL",
     num_threads = 1,
     pert = "asymptotic",
     seed = NULL,
-    match_mediation = TRUE,
+    rng_mode = "mediate",
     mediator.family = "gaussian",
     outcome.family = "gaussian"
   )
@@ -132,7 +140,7 @@ test_that("match_mediation=TRUE follows current R RNG stream when seed is NULL",
   check_effect("tau", fast, med_result$tau.coef, med_result$tau.ci, med_result$tau.p)
 })
 
-test_that("match_mediation=TRUE remains mediate-identical with parallel threads", {
+test_that("rng_mode='mediate' remains mediate-identical with parallel threads", {
   skip_if_not_installed("mediation")
   skip_if(parallel::detectCores(logical = FALSE) < 2,
           "Need at least 2 physical cores for parallel test")
@@ -167,7 +175,7 @@ test_that("match_mediation=TRUE remains mediate-identical with parallel threads"
   med_result <- do.call(mediation::mediate, mediate_args)
 
   output_csv <- withr::local_tempfile(fileext = ".csv")
-  mediation_analysis(
+  mediation_analysis_for_comparison(
     data = data,
     columns = list(exposure = "T", mediator = "M", outcome = "Y"),
     nrep = sims,
@@ -175,7 +183,7 @@ test_that("match_mediation=TRUE remains mediate-identical with parallel threads"
     num_threads = 4,
     pert = "asymptotic",
     seed = 4243,
-    match_mediation = TRUE,
+    rng_mode = "mediate",
     mediator.family = "gaussian",
     outcome.family = "gaussian"
   )
@@ -226,7 +234,7 @@ test_that("fastmed matches mediation::mediate() with NA omitted per combination"
   med_result <- do.call(mediation::mediate, mediate_args)
 
   output_csv <- withr::local_tempfile(fileext = ".csv")
-  mediation_analysis(
+  mediation_analysis_for_comparison(
     data = data,
     columns = list(exposure = "T", mediator = "M", outcome = "Y"),
     nrep = sims,
@@ -279,7 +287,7 @@ test_that("fastmed roughly matches mediation::mediate() for Gaussian/Gaussian (b
   med_result <- do.call(mediation::mediate, mediate_args)
 
   output_csv <- withr::local_tempfile(fileext = ".csv")
-  mediation_analysis(
+  mediation_analysis_for_comparison(
     data = data,
     columns = list(exposure = "T", mediator = "M", outcome = "Y"),
     nrep = sims,
@@ -328,7 +336,7 @@ test_that("fastmed roughly matches mediation::mediate() for Gaussian/Gaussian wi
   med_result <- do.call(mediation::mediate, mediate_args)
 
   output_csv <- withr::local_tempfile(fileext = ".csv")
-  mediation_analysis(
+  mediation_analysis_for_comparison(
     data = data,
     columns = list(exposure = "T", mediator = "M", outcome = "Y"),
     nrep = sims,
@@ -387,7 +395,7 @@ test_that("fastmed roughly matches mediation::mediate() for Gaussian/Gaussian wi
   med_result <- do.call(mediation::mediate, mediate_args)
 
   output_csv <- withr::local_tempfile(fileext = ".csv")
-  mediation_analysis(
+  mediation_analysis_for_comparison(
     data = data,
     columns = list(exposure = "T", mediator = "M", outcome = "Y"),
     nrep = sims,
@@ -442,7 +450,7 @@ test_that("fastmed roughly matches mediation::mediate() for Gaussian/Binomial (a
   med_result <- do.call(mediation::mediate, mediate_args)
 
   output_csv <- withr::local_tempfile(fileext = ".csv")
-  mediation_analysis(
+  mediation_analysis_for_comparison(
     data = data,
     columns = list(exposure = "T", mediator = "M", outcome = "Y"),
     nrep = sims,
@@ -496,7 +504,7 @@ test_that("fastmed roughly matches mediation::mediate() for Binomial/Gaussian (a
   med_result <- do.call(mediation::mediate, mediate_args)
 
   output_csv <- withr::local_tempfile(fileext = ".csv")
-  mediation_analysis(
+  mediation_analysis_for_comparison(
     data = data,
     columns = list(exposure = "T", mediator = "M", outcome = "Y"),
     nrep = sims,
@@ -550,7 +558,7 @@ test_that("fastmed roughly matches mediation::mediate() for Binomial/Binomial (a
   med_result <- do.call(mediation::mediate, mediate_args)
 
   output_csv <- withr::local_tempfile(fileext = ".csv")
-  mediation_analysis(
+  mediation_analysis_for_comparison(
     data = data,
     columns = list(exposure = "T", mediator = "M", outcome = "Y"),
     nrep = sims,
@@ -604,7 +612,7 @@ test_that("fastmed roughly matches mediation::mediate() for Poisson/Poisson (asy
   med_result <- do.call(mediation::mediate, mediate_args)
 
   output_csv <- withr::local_tempfile(fileext = ".csv")
-  mediation_analysis(
+  mediation_analysis_for_comparison(
     data = data,
     columns = list(exposure = "T", mediator = "M", outcome = "Y"),
     nrep = sims,
@@ -657,7 +665,7 @@ test_that("fastmed matches mediation::mediate() for Poisson/Poisson with large m
   med_result <- do.call(mediation::mediate, mediate_args)
 
   output_csv <- withr::local_tempfile(fileext = ".csv")
-  mediation_analysis(
+  mediation_analysis_for_comparison(
     data = data,
     columns = list(exposure = "T", mediator = "M", outcome = "Y"),
     nrep = sims,
@@ -711,7 +719,7 @@ test_that("fastmed roughly matches mediation::mediate() for Gaussian/Poisson (as
   med_result <- do.call(mediation::mediate, mediate_args)
 
   output_csv <- withr::local_tempfile(fileext = ".csv")
-  mediation_analysis(
+  mediation_analysis_for_comparison(
     data = data,
     columns = list(exposure = "T", mediator = "M", outcome = "Y"),
     nrep = sims,
@@ -765,7 +773,7 @@ test_that("fastmed roughly matches mediation::mediate() for Poisson/Gaussian (as
   med_result <- do.call(mediation::mediate, mediate_args)
 
   output_csv <- withr::local_tempfile(fileext = ".csv")
-  mediation_analysis(
+  mediation_analysis_for_comparison(
     data = data,
     columns = list(exposure = "T", mediator = "M", outcome = "Y"),
     nrep = sims,
@@ -819,7 +827,7 @@ test_that("fastmed roughly matches mediation::mediate() for Binomial/Poisson (as
   med_result <- do.call(mediation::mediate, mediate_args)
 
   output_csv <- withr::local_tempfile(fileext = ".csv")
-  mediation_analysis(
+  mediation_analysis_for_comparison(
     data = data,
     columns = list(exposure = "T", mediator = "M", outcome = "Y"),
     nrep = sims,
@@ -873,7 +881,7 @@ test_that("fastmed roughly matches mediation::mediate() for Poisson/Binomial (as
   med_result <- do.call(mediation::mediate, mediate_args)
 
   output_csv <- withr::local_tempfile(fileext = ".csv")
-  mediation_analysis(
+  mediation_analysis_for_comparison(
     data = data,
     columns = list(exposure = "T", mediator = "M", outcome = "Y"),
     nrep = sims,
@@ -915,7 +923,7 @@ test_that("fastmed completes across all family combinations (smoke)", {
     )
 
     output_csv <- withr::local_tempfile(fileext = ".csv")
-    mediation_analysis(
+    mediation_analysis_for_comparison(
       data = data,
       columns = list(exposure = "T", mediator = "M", outcome = "Y"),
       nrep = 30,
@@ -942,7 +950,7 @@ test_that("Monte Carlo variability decreases as nrep increases", {
 
   run_d0 <- function(nrep, seed) {
     output_csv <- withr::local_tempfile(fileext = ".csv")
-    mediation_analysis(
+    mediation_analysis_for_comparison(
       data = data,
       columns = list(exposure = "T", mediator = "M", outcome = "Y"),
       nrep = nrep,
@@ -984,7 +992,7 @@ test_that("Gaussian/Gaussian CI contains the true d0 effect reasonably often", {
     )
 
     output_csv <- withr::local_tempfile(fileext = ".csv")
-    mediation_analysis(
+    mediation_analysis_for_comparison(
       data = data,
       columns = list(exposure = "T", mediator = "M", outcome = "Y"),
       nrep = 250,

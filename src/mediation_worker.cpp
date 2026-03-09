@@ -121,6 +121,8 @@ MediationWorker::MediationWorker(const Eigen::Map<const MatrixXd>& data_,
                                  uint64_t base_seed_,
                                  bool match_mediation_,
                                  LoopOrder loop_order_,
+                                 bool fail_fast_,
+                                 bool include_failure_reason_,
                                  size_t chunk_begin_,
                                  std::vector<std::string>& output_lines_,
                                  const MatchMediationRngBlock* match_rng_)
@@ -144,6 +146,8 @@ MediationWorker::MediationWorker(const Eigen::Map<const MatrixXd>& data_,
       base_seed(base_seed_),
       match_mediation(match_mediation_),
       loop_order(loop_order_),
+      fail_fast(fail_fast_),
+      include_failure_reason(include_failure_reason_),
       chunk_begin(chunk_begin_),
       output_lines(output_lines_),
       match_rng(match_rng_) {}
@@ -190,19 +194,35 @@ std::string MediationWorker::process_combination_serial(std::size_t idx,
 }
 
 std::string MediationWorker::format_na_row(const std::string& exposure_col,
-                                          const std::string& mediator_col,
-                                          const std::string& outcome_col) {
+                                           const std::string& mediator_col,
+                                           const std::string& outcome_col,
+                                           const std::string& failure_reason) {
     std::string combination = exposure_col + "_" + mediator_col + "_" + outcome_col;
 
     std::string result;
-    result.reserve(combination.size() + 128);
+    result.reserve(combination.size() + failure_reason.size() + 160);
     result += csv_escape(combination, excel_safe_csv);
+    if (include_failure_reason) {
+        result.push_back(',');
+        result += csv_escape(failure_reason, excel_safe_csv);
+    }
     const int na_cols = legacy_output_schema ? 12 : 20;
     for (int i = 0; i < na_cols; ++i) {
         result += ",NA";
     }
     result.push_back('\n');
     return result;
+}
+
+std::string MediationWorker::handle_failure(const std::string& exposure_col,
+                                            const std::string& mediator_col,
+                                            const std::string& outcome_col,
+                                            const std::string& failure_reason) {
+    if (fail_fast) {
+        throw std::runtime_error("Combination '" + exposure_col + "_" + mediator_col + "_" +
+                                 outcome_col + "' failed: " + failure_reason);
+    }
+    return format_na_row(exposure_col, mediator_col, outcome_col, failure_reason);
 }
 
 std::string MediationWorker::process_combination(std::size_t idx,
@@ -237,8 +257,17 @@ std::string MediationWorker::process_combination(std::size_t idx,
     const uint64_t combination_seed_idx =
         canonical_combination_index(exp_list_idx, med_list_idx, out_list_idx, m, o);
 
-    if (!mediator_fams_ok[med_list_idx] || !outcome_fams_ok[out_list_idx]) {
-        return format_na_row(exposure_col, mediator_col, outcome_col);
+    if (!mediator_fams_ok[med_list_idx]) {
+        return handle_failure(exposure_col,
+                              mediator_col,
+                              outcome_col,
+                              "mediator_family_auto_detection_failed");
+    }
+    if (!outcome_fams_ok[out_list_idx]) {
+        return handle_failure(exposure_col,
+                              mediator_col,
+                              outcome_col,
+                              "outcome_family_auto_detection_failed");
     }
     const GlmFamily fam_m = mediator_fams[med_list_idx];
     const GlmFamily fam_y = outcome_fams[out_list_idx];
@@ -268,7 +297,8 @@ std::string MediationWorker::process_combination(std::size_t idx,
         const int p_med = 2;
         const int p_out = 3;
         if (n <= p_med || n <= p_out) {
-            return format_na_row(exposure_col, mediator_col, outcome_col);
+            return handle_failure(
+                exposure_col, mediator_col, outcome_col, "insufficient_complete_cases");
         }
 
         const auto exposure_obs = X_med.topRows(n).col(1);
@@ -437,7 +467,10 @@ std::string MediationWorker::process_combination(std::size_t idx,
         if (bootstrap_results.empty()) {
             // In match_mediation bootstrap mode, individual replicates may fail; only
             // return an NA row if all replicates failed.
-            return format_na_row(exposure_col, mediator_col, outcome_col);
+            return handle_failure(exposure_col,
+                                  mediator_col,
+                                  outcome_col,
+                                  "all_bootstrap_replicates_failed");
         }
 
         return format_results(exposure_col,
@@ -445,8 +478,10 @@ std::string MediationWorker::process_combination(std::size_t idx,
                               outcome_col,
                               bootstrap_results,
                               t0_ptr);
+    } catch (const std::exception& ex) {
+        return handle_failure(exposure_col, mediator_col, outcome_col, ex.what());
     } catch (...) {
-        return format_na_row(exposure_col, mediator_col, outcome_col);
+        return handle_failure(exposure_col, mediator_col, outcome_col, "unknown_error");
     }
 }
 
@@ -1617,6 +1652,9 @@ std::string MediationWorker::format_results(
     std::string result;
     result.reserve(combination.size() + 512 + 32);
     result += csv_escape(combination, excel_safe_csv);
+    if (include_failure_reason) {
+        result += ",NA";
+    }
     result.push_back(',');
     if (legacy_output_schema) {
         append_statistics(result, d0_stats);

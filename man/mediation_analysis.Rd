@@ -12,7 +12,8 @@ mediation_analysis(
   num_threads = parallel::detectCores(),
   pert = "asymptotic",
   seed = NULL,
-  match_mediation = !is.null(seed),
+  match_mediation = NULL,
+  rng_mode = c("fast", "mediate"),
   chunk_size = 10000,
   grain_size = 100,
   loop_order = c("exposure", "mediator", "outcome"),
@@ -24,7 +25,9 @@ mediation_analysis(
   treat.value = 1,
   control.value = 0,
   overwrite = TRUE,
-  excel_safe_csv = FALSE
+  excel_safe_csv = FALSE,
+  failure_mode = c("na_row", "error"),
+  include_failure_reason = FALSE
 )
 }
 \arguments{
@@ -47,11 +50,15 @@ estimation. Options are `"asymptotic"` and `"bootstrap"`. Default is
 
 \item{seed}{Optional non-negative integer. If provided, results are
 reproducible across thread counts within the same build/runtime
-environment. When `match_mediation = TRUE` and `seed = NULL`, fastmed uses
+environment. When `rng_mode = "mediate"` and `seed = NULL`, fastmed uses
 the current R RNG stream (it does not call `set.seed()` internally).}
 
-\item{match_mediation}{Logical; if `TRUE`, align random number usage more
-closely with `mediation::mediate()`. Defaults to `!is.null(seed)`.}
+\item{match_mediation}{Deprecated alias for `rng_mode`. If supplied, it
+overrides `rng_mode`.}
+
+\item{rng_mode}{Random number mode. `"fast"` uses fast deterministic
+per-combination seeding; `"mediate"` aligns random number usage more
+closely with `mediation::mediate()`. Default is `"fast"`.}
 
 \item{chunk_size}{Maximum number of (exposure, mediator, outcome) combinations
 to buffer per chunk inside the C++ backend. Smaller values reduce peak
@@ -80,6 +87,13 @@ observed outcome. Default is FALSE.}
 effect columns (`d0`, `d1`, `z0`, `z1`, `tau`). `"legacy"` writes the
 previous schema (`ACME_*`, `ADE_*`, `Total_Effect_*`). Default is
 `"mediate"`.}
+
+\item{failure_mode}{How to handle failing combinations. `"na_row"` writes an
+`NA` row (default). `"error"` stops immediately with an error.}
+
+\item{include_failure_reason}{Logical; if `TRUE`, add a `failure_reason`
+column to the output CSV (`NA` for successful rows, reason text for
+failed rows). Default is `FALSE`.}
 
 \item{weights}{Optional numeric vector of prior weights (length `nrow(data)`). Non-negative, finite, and must sum to a positive value. Default is `NULL` (unweighted).}
 
@@ -131,6 +145,9 @@ Infinite values (`Inf`, `-Inf`) are rejected at input validation time.
 
 Setting `replace.outcome = TRUE` replaces some simulated outcomes with
 observed outcomes and may reduce agreement with `mediation::mediate()`.
+
+If `failure_mode = "na_row"`, failing combinations are kept in output as
+`NA` rows. If `failure_mode = "error"`, analysis stops on first failure.
 }
 \examples{
 \dontrun{

@@ -26,6 +26,7 @@ serial_path_analysis(
   max_combinations = Inf,
   overwrite = TRUE,
   excel_safe_csv = FALSE,
+  include_failure_reason = FALSE,
   output = c("fit", "params", "effects")
 )
 }
@@ -93,6 +94,9 @@ overwriting.}
 \item{excel_safe_csv}{If `TRUE`, prefix potentially dangerous spreadsheet
 formula strings (values starting with `=`, `+`, `-`, `@`) with a leading `'`
 in text fields.}
+
+\item{include_failure_reason}{Logical; if `TRUE`, add `failure_reason` to fit
+output (`NA` for successful combinations, reason text for failed rows).}
 
 \item{output}{Which output files to write. One or more of
 `c("fit", "params", "effects")`.}

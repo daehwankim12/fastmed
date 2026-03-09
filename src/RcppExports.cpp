@@ -79,8 +79,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // mediation_analysis_cpp
-void mediation_analysis_cpp(NumericMatrix data, CharacterVector column_names, IntegerVector exposure_col_idx, IntegerVector mediator_col_idx, IntegerVector outcome_col_idx, int nrep, std::string output_file, Rcpp::Nullable<Rcpp::NumericVector> weights, std::string pert, uint64_t base_seed, std::string mediator_family, std::string outcome_family, bool replace_outcome, std::string output_format, double treat_value, double control_value, int chunk_size, int grain_size, bool overwrite, bool excel_safe_csv, bool match_mediation, std::string loop_order);
-RcppExport SEXP _fastmed_mediation_analysis_cpp(SEXP dataSEXP, SEXP column_namesSEXP, SEXP exposure_col_idxSEXP, SEXP mediator_col_idxSEXP, SEXP outcome_col_idxSEXP, SEXP nrepSEXP, SEXP output_fileSEXP, SEXP weightsSEXP, SEXP pertSEXP, SEXP base_seedSEXP, SEXP mediator_familySEXP, SEXP outcome_familySEXP, SEXP replace_outcomeSEXP, SEXP output_formatSEXP, SEXP treat_valueSEXP, SEXP control_valueSEXP, SEXP chunk_sizeSEXP, SEXP grain_sizeSEXP, SEXP overwriteSEXP, SEXP excel_safe_csvSEXP, SEXP match_mediationSEXP, SEXP loop_orderSEXP) {
+void mediation_analysis_cpp(NumericMatrix data, CharacterVector column_names, IntegerVector exposure_col_idx, IntegerVector mediator_col_idx, IntegerVector outcome_col_idx, int nrep, std::string output_file, Rcpp::Nullable<Rcpp::NumericVector> weights, std::string pert, uint64_t base_seed, std::string mediator_family, std::string outcome_family, bool replace_outcome, std::string output_format, double treat_value, double control_value, int chunk_size, int grain_size, bool overwrite, bool excel_safe_csv, bool match_mediation, std::string loop_order, bool fail_fast, bool include_failure_reason);
+RcppExport SEXP _fastmed_mediation_analysis_cpp(SEXP dataSEXP, SEXP column_namesSEXP, SEXP exposure_col_idxSEXP, SEXP mediator_col_idxSEXP, SEXP outcome_col_idxSEXP, SEXP nrepSEXP, SEXP output_fileSEXP, SEXP weightsSEXP, SEXP pertSEXP, SEXP base_seedSEXP, SEXP mediator_familySEXP, SEXP outcome_familySEXP, SEXP replace_outcomeSEXP, SEXP output_formatSEXP, SEXP treat_valueSEXP, SEXP control_valueSEXP, SEXP chunk_sizeSEXP, SEXP grain_sizeSEXP, SEXP overwriteSEXP, SEXP excel_safe_csvSEXP, SEXP match_mediationSEXP, SEXP loop_orderSEXP, SEXP fail_fastSEXP, SEXP include_failure_reasonSEXP) {
 BEGIN_RCPP
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< NumericMatrix >::type data(dataSEXP);
@@ -105,13 +105,15 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< bool >::type excel_safe_csv(excel_safe_csvSEXP);
     Rcpp::traits::input_parameter< bool >::type match_mediation(match_mediationSEXP);
     Rcpp::traits::input_parameter< std::string >::type loop_order(loop_orderSEXP);
-    mediation_analysis_cpp(data, column_names, exposure_col_idx, mediator_col_idx, outcome_col_idx, nrep, output_file, weights, pert, base_seed, mediator_family, outcome_family, replace_outcome, output_format, treat_value, control_value, chunk_size, grain_size, overwrite, excel_safe_csv, match_mediation, loop_order);
+    Rcpp::traits::input_parameter< bool >::type fail_fast(fail_fastSEXP);
+    Rcpp::traits::input_parameter< bool >::type include_failure_reason(include_failure_reasonSEXP);
+    mediation_analysis_cpp(data, column_names, exposure_col_idx, mediator_col_idx, outcome_col_idx, nrep, output_file, weights, pert, base_seed, mediator_family, outcome_family, replace_outcome, output_format, treat_value, control_value, chunk_size, grain_size, overwrite, excel_safe_csv, match_mediation, loop_order, fail_fast, include_failure_reason);
     return R_NilValue;
 END_RCPP
 }
 // serial_path_analysis_cpp
-void serial_path_analysis_cpp(NumericMatrix data, CharacterVector column_names, IntegerVector x_col_idx, List mediator_col_idx_list, IntegerVector y_col_idx, int m, int nrep, std::string output_fit_file, std::string output_params_file, std::string output_effects_file, uint64_t base_seed, double alpha, double combination_start, double combination_end, uint64_t shard_id, uint64_t shard_count, int chunk_size, int grain_size, bool overwrite, bool excel_safe_csv, bool write_fit, bool write_params, bool write_effects);
-RcppExport SEXP _fastmed_serial_path_analysis_cpp(SEXP dataSEXP, SEXP column_namesSEXP, SEXP x_col_idxSEXP, SEXP mediator_col_idx_listSEXP, SEXP y_col_idxSEXP, SEXP mSEXP, SEXP nrepSEXP, SEXP output_fit_fileSEXP, SEXP output_params_fileSEXP, SEXP output_effects_fileSEXP, SEXP base_seedSEXP, SEXP alphaSEXP, SEXP combination_startSEXP, SEXP combination_endSEXP, SEXP shard_idSEXP, SEXP shard_countSEXP, SEXP chunk_sizeSEXP, SEXP grain_sizeSEXP, SEXP overwriteSEXP, SEXP excel_safe_csvSEXP, SEXP write_fitSEXP, SEXP write_paramsSEXP, SEXP write_effectsSEXP) {
+void serial_path_analysis_cpp(NumericMatrix data, CharacterVector column_names, IntegerVector x_col_idx, List mediator_col_idx_list, IntegerVector y_col_idx, int m, int nrep, std::string output_fit_file, std::string output_params_file, std::string output_effects_file, uint64_t base_seed, double alpha, double combination_start, double combination_end, uint64_t shard_id, uint64_t shard_count, int chunk_size, int grain_size, bool overwrite, bool excel_safe_csv, bool write_fit, bool write_params, bool write_effects, bool include_failure_reason);
+RcppExport SEXP _fastmed_serial_path_analysis_cpp(SEXP dataSEXP, SEXP column_namesSEXP, SEXP x_col_idxSEXP, SEXP mediator_col_idx_listSEXP, SEXP y_col_idxSEXP, SEXP mSEXP, SEXP nrepSEXP, SEXP output_fit_fileSEXP, SEXP output_params_fileSEXP, SEXP output_effects_fileSEXP, SEXP base_seedSEXP, SEXP alphaSEXP, SEXP combination_startSEXP, SEXP combination_endSEXP, SEXP shard_idSEXP, SEXP shard_countSEXP, SEXP chunk_sizeSEXP, SEXP grain_sizeSEXP, SEXP overwriteSEXP, SEXP excel_safe_csvSEXP, SEXP write_fitSEXP, SEXP write_paramsSEXP, SEXP write_effectsSEXP, SEXP include_failure_reasonSEXP) {
 BEGIN_RCPP
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< NumericMatrix >::type data(dataSEXP);
@@ -137,7 +139,8 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< bool >::type write_fit(write_fitSEXP);
     Rcpp::traits::input_parameter< bool >::type write_params(write_paramsSEXP);
     Rcpp::traits::input_parameter< bool >::type write_effects(write_effectsSEXP);
-    serial_path_analysis_cpp(data, column_names, x_col_idx, mediator_col_idx_list, y_col_idx, m, nrep, output_fit_file, output_params_file, output_effects_file, base_seed, alpha, combination_start, combination_end, shard_id, shard_count, chunk_size, grain_size, overwrite, excel_safe_csv, write_fit, write_params, write_effects);
+    Rcpp::traits::input_parameter< bool >::type include_failure_reason(include_failure_reasonSEXP);
+    serial_path_analysis_cpp(data, column_names, x_col_idx, mediator_col_idx_list, y_col_idx, m, nrep, output_fit_file, output_params_file, output_effects_file, base_seed, alpha, combination_start, combination_end, shard_id, shard_count, chunk_size, grain_size, overwrite, excel_safe_csv, write_fit, write_params, write_effects, include_failure_reason);
     return R_NilValue;
 END_RCPP
 }
@@ -148,8 +151,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastmed_fastmed_test_two_bootstrap_samples", (DL_FUNC) &_fastmed_fastmed_test_two_bootstrap_samples, 4},
     {"_fastmed_fastmed_test_ols_sigmas_cpp", (DL_FUNC) &_fastmed_fastmed_test_ols_sigmas_cpp, 3},
     {"_fastmed_glm_fit_cpp", (DL_FUNC) &_fastmed_glm_fit_cpp, 8},
-    {"_fastmed_mediation_analysis_cpp", (DL_FUNC) &_fastmed_mediation_analysis_cpp, 22},
-    {"_fastmed_serial_path_analysis_cpp", (DL_FUNC) &_fastmed_serial_path_analysis_cpp, 23},
+    {"_fastmed_mediation_analysis_cpp", (DL_FUNC) &_fastmed_mediation_analysis_cpp, 24},
+    {"_fastmed_serial_path_analysis_cpp", (DL_FUNC) &_fastmed_serial_path_analysis_cpp, 24},
     {NULL, NULL, 0}
 };
 

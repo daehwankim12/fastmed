@@ -62,6 +62,8 @@
 #' @param excel_safe_csv If `TRUE`, prefix potentially dangerous spreadsheet
 #'   formula strings (values starting with `=`, `+`, `-`, `@`) with a leading `'`
 #'   in text fields.
+#' @param include_failure_reason Logical; if `TRUE`, add `failure_reason` to fit
+#'   output (`NA` for successful combinations, reason text for failed rows).
 #' @param output Which output files to write. One or more of
 #'   `c("fit", "params", "effects")`.
 #'
@@ -88,6 +90,7 @@ serial_path_analysis <- function(data,
                                  max_combinations = Inf,
                                  overwrite = TRUE,
                                  excel_safe_csv = FALSE,
+                                 include_failure_reason = FALSE,
                                  output = c("fit", "params", "effects")) {
   validate_data(data)
 
@@ -127,6 +130,10 @@ serial_path_analysis <- function(data,
     stop("excel_safe_csv must be TRUE or FALSE.")
   }
   excel_safe_csv <- isTRUE(excel_safe_csv)
+  if (!is.logical(include_failure_reason) || length(include_failure_reason) != 1L || is.na(include_failure_reason)) {
+    stop("include_failure_reason must be TRUE or FALSE.")
+  }
+  include_failure_reason <- isTRUE(include_failure_reason)
 
   resolve_columns <- function(spec, all_columns, type_name) {
     if (match == "exact") {
@@ -429,7 +436,8 @@ serial_path_analysis <- function(data,
     excel_safe_csv = excel_safe_csv,
     write_fit = write_fit,
     write_params = write_params,
-    write_effects = write_effects
+    write_effects = write_effects,
+    include_failure_reason = include_failure_reason
   )
 
   created <- selected_files[file.exists(selected_files)]
